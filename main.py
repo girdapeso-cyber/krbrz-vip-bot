@@ -315,6 +315,9 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         channel_type = reply_info['type'].replace('add_channel_', '')
         channel_name = update.message.text.strip()
         config_key = f"{channel_type}_channels"
+        
+        if not channel_name.startswith("@") and not channel_name.startswith("-100"):
+            channel_name = f"@{channel_name}"
 
         if channel_name not in bot_config[config_key]:
             bot_config[config_key].append(channel_name)
@@ -333,7 +336,12 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message: return
 
     chat_identifier = f"@{message.chat.username}" if message.chat.username else str(message.chat.id)
-    if chat_identifier not in bot_config["source_channels"]: return
+    
+    if (
+        chat_identifier not in bot_config["source_channels"]
+        and str(message.chat.id) not in bot_config["source_channels"]
+    ):
+        return
 
     try:
         final_caption = ""
@@ -391,7 +399,8 @@ def main():
     application.add_handler(CallbackQueryHandler(menu_callback_handler))
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, reply_handler))
     
-    application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
+    # İYİLEŞTİRME: Sadece kanal postlarını değil, tüm içerik türlerini dinle
+    application.add_handler(MessageHandler(filters.ALL & filters.ChatType.CHANNEL, forwarder))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
