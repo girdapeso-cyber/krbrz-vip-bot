@@ -120,10 +120,7 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
     if not GEMINI_API_KEY or not original_text:
         return original_text + " @KRBRZ063 #KRBRZ"
 
-    # AI kişiliğini ve sistem talimatını config'den al
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
-    
-    # AI'ye gönderilen talimat çok daha akıllı ve dinamik
     user_prompt = f"Aşağıdaki metnin içeriğini analiz et: '{original_text}'. Bu içeriğe dayanarak, seçtiğim kişiliğe uygun, kısa, yaratıcı ve dikkat çekici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir açıklama yapma."
 
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
@@ -131,8 +128,8 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
         "contents": [{"parts": [{"text": user_prompt}]}],
         "systemInstruction": {"parts": [{"text": persona_prompt}]},
         "generationConfig": {
-            "maxOutputTokens": 80,  # Yaratıcılık için biraz daha alan
-            "temperature": 0.8,    # Daha yaratıcı ve çeşitli sonuçlar için sıcaklık artırıldı
+            "maxOutputTokens": 80,
+            "temperature": 0.8,
             "topP": 0.9,
             "topK": 40
         }
@@ -147,7 +144,7 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
             return enhanced_text
     except Exception as e:
         logger.error(f"Akıllı Metin API hatası: {e}")
-        return original_text + " @KRBRZ063 #KRBRZ" # Hata durumunda bile etiket ekle
+        return original_text + " @KRBRZ063 #KRBRZ"
 
 
 async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
@@ -161,7 +158,6 @@ async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
-    # AI'ye gönderilen talimat artık görseli analiz etmesini istiyor
     user_prompt = (
         "Bu bir PUBG Mobile oyununa ait ekran görüntüsü. Görüntüyü dikkatlice analiz et. "
         "Görüntüde ne oluyor? (Örn: Bir zafer anı mı? 'Winner Winner Chicken Dinner' yazısı var mı? Yoğun bir çatışma mı var? Bir oyuncu dürbünle rakip mi arıyor?) "
@@ -193,10 +189,10 @@ async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
             return caption
     except Exception as e:
         logger.error(f"Akıllı Görüntü API hatası: {e}")
-        return "Zirve bizimdir! 👑 @KRBRZ063 #PUBGHACK #KRBRZ" # Hata durumunda genel bir başlık
+        return "Zirve bizimdir! 👑 @KRBRZ063 #PUBGHACK #KRBRZ"
 
 
-# --- Filigran Fonksiyonu (Değişiklik yok) ---
+# --- Filigran Fonksiyonu ---
 async def apply_watermark(photo_bytes: bytes) -> bytes:
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"):
@@ -211,7 +207,13 @@ async def apply_watermark(photo_bytes: bytes) -> bytes:
                 font = ImageFont.load_default()
             
             d = ImageDraw.Draw(txt)
-            fill_color = tuple(int(wm_config.get("color", "255,255,255,180").split(',')[i]) for i in range(4))
+            
+            colors = {
+                "beyaz": (255, 255, 255, 180),
+                "siyah": (0, 0, 0, 180),
+                "kirmizi": (255, 0, 0, 180)
+            }
+            fill_color = colors.get(wm_config.get("color", "beyaz").lower(), (255, 255, 255, 180))
             text = wm_config.get("text", "KRBRZ_VIP")
             
             text_bbox = d.textbbox((0, 0), text, font=font)
@@ -235,7 +237,6 @@ async def apply_watermark(photo_bytes: bytes) -> bytes:
         return photo_bytes
 
 # --- Admin ve Ayar Komutları ---
-
 def admin_only(func):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         if update.effective_user.id != ADMIN_USER_ID:
@@ -244,18 +245,20 @@ def admin_only(func):
         return await func(update, context, *args, **kwargs)
     return wrapped
 
-# --- Kurulum Sihirbazı ---
-SETUP_MENU, GET_SOURCE, GET_DEST, GET_PERSONA = range(4)
+# --- YENİ PROFESYONEL KURULUM SİHİRBAZI ---
+(SETUP_MENU, GET_PERSONA, 
+ MANAGE_SOURCE, MANAGE_DEST, 
+ ADD_SOURCE, ADD_DEST) = range(6)
 
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """YENİLENDİ: AI Kişilik ayarı eklendi."""
     text_ai_status = "✅ Aktif" if bot_config["ai_text_enhancement_enabled"] else "❌ Pasif"
     image_ai_status = "✅ Aktif" if bot_config["ai_image_analysis_enabled"] else "❌ Pasif"
     wm_status = f"✅ Aktif" if bot_config['watermark']['enabled'] else "❌ Pasif"
     
     keyboard = [
-        [InlineKeyboardButton("📡 Kaynak Kanallar", callback_data='set_source'), InlineKeyboardButton("📤 Hedef Kanallar", callback_data='set_dest')],
+        [InlineKeyboardButton("📡 Kaynak Kanalları Yönet", callback_data='manage_source')],
+        [InlineKeyboardButton("📤 Hedef Kanalları Yönet", callback_data='manage_dest')],
         [InlineKeyboardButton(f"🤖 Akıllı Metin: {text_ai_status}", callback_data='toggle_text_ai')],
         [InlineKeyboardButton(f"🖼️ Akıllı Görüntü: {image_ai_status}", callback_data='toggle_image_ai')],
         [InlineKeyboardButton(f"🎭 AI Kişiliği: {bot_config['ai_persona']}", callback_data='set_persona')],
@@ -278,12 +281,12 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     data = query.data
     
-    if data == 'set_source':
-        await query.edit_message_text("📡 Kaynak kanal adını yazın (@ile başlayın). Mevcutları silmek için tekrar yazın.")
-        return GET_SOURCE
-    elif data == 'set_dest':
-        await query.edit_message_text("📤 Hedef kanal adını yazın. Mevcutları silmek için tekrar yazın.")
-        return GET_DEST
+    if data == 'manage_source':
+        await manage_channels_menu(update, context, 'source')
+        return MANAGE_SOURCE
+    elif data == 'manage_dest':
+        await manage_channels_menu(update, context, 'dest')
+        return MANAGE_DEST
     elif data == 'toggle_text_ai':
         bot_config["ai_text_enhancement_enabled"] = not bot_config["ai_text_enhancement_enabled"]
     elif data == 'toggle_image_ai':
@@ -295,7 +298,7 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             [InlineKeyboardButton("Agresif Pazarlamacı", callback_data='persona_Agresif Pazarlamacı')],
             [InlineKeyboardButton("Profesyonel Satıcı", callback_data='persona_Profesyonel Satıcı')],
             [InlineKeyboardButton("Eğlenceli Oyuncu", callback_data='persona_Eğlenceli Oyuncu')],
-            [InlineKeyboardButton("⬅️ Geri", callback_data='back_to_menu')],
+            [InlineKeyboardButton("⬅️ Geri", callback_data='back_to_main_menu')],
         ]
         await query.edit_message_text("🎭 Yapay zeka için bir kişilik seçin:", reply_markup=InlineKeyboardMarkup(keyboard))
         return GET_PERSONA
@@ -310,32 +313,102 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    
+    if query.data == 'back_to_main_menu':
+        return await setup_command(update, context)
+
     persona = query.data.split('_')[1]
     bot_config["ai_persona"] = persona
     save_config()
     await query.message.reply_text(f"✅ AI kişiliği '{persona}' olarak ayarlandı.")
-    return await setup_command(query, context)
+    return await setup_command(update, context)
 
-async def channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str) -> int:
+async def manage_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
+    """Kanal yönetimi için dinamik bir menü gösterir."""
+    query = update.callback_query
+    
+    config_key = f"{channel_type}_channels"
+    channels = bot_config.get(config_key, [])
+    title = "Kaynak" if channel_type == 'source' else "Hedef"
+    
+    text = f"⚙️ **{title} Kanalları Yönetimi**\n\nMevcut kanallar:"
+    if not channels:
+        text += "\n\n_Henüz kanal eklenmemiş._"
+    
+    keyboard = []
+    for channel in channels:
+        keyboard.append([InlineKeyboardButton(f"🗑️ Sil: {channel}", callback_data=f'remove_{channel_type}_{channel}')])
+        
+    keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
+    keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main_menu')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if query:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else: # Yeni kanal eklendikten sonra yeni mesaj olarak gönderilir
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Kaynak kanalları yönetimi menüsündeki butonları yönetir."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == 'add_source':
+        await query.edit_message_text("📡 Eklenecek yeni **Kaynak** kanalının adını yazın (@ile veya ID olarak).")
+        return ADD_SOURCE
+    elif data.startswith('remove_source_'):
+        channel_name = data.replace('remove_source_', '')
+        if channel_name in bot_config['source_channels']:
+            bot_config['source_channels'].remove(channel_name)
+            save_config()
+        await manage_channels_menu(update, context, 'source')
+        return MANAGE_SOURCE
+    elif data == 'back_to_main_menu':
+        await setup_command(update, context)
+        return SETUP_MENU
+
+async def dest_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Hedef kanalları yönetimi menüsündeki butonları yönetir."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == 'add_dest':
+        await query.edit_message_text("📤 Eklenecek yeni **Hedef** kanalının adını yazın (@ile veya ID olarak).")
+        return ADD_DEST
+    elif data.startswith('remove_dest_'):
+        channel_name = data.replace('remove_dest_', '')
+        if channel_name in bot_config['destination_channels']:
+            bot_config['destination_channels'].remove(channel_name)
+            save_config()
+        await manage_channels_menu(update, context, 'dest')
+        return MANAGE_DEST
+    elif data == 'back_to_main_menu':
+        await setup_command(update, context)
+        return SETUP_MENU
+
+async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str) -> int:
+    """Kullanıcıdan gelen metni yeni bir kanal olarak ekler."""
     channel = update.message.text.strip()
     config_key = f"{channel_type}_channels"
-    if channel in bot_config[config_key]:
-        bot_config[config_key].remove(channel)
-        await update.message.reply_text(f"🗑️ Kanal silindi: {channel}")
-    else:
+    
+    if channel not in bot_config[config_key]:
         bot_config[config_key].append(channel)
+        save_config()
         await update.message.reply_text(f"✅ Kanal eklendi: {channel}")
-    return SETUP_MENU
+    else:
+        await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}")
 
-async def get_source_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await channel_handler(update, context, "source")
-    await update.message.reply_text("Kaynak kanallar güncellendi. Başka ekleyebilir veya /ayarla ile menüye dönebilirsiniz.")
-    return GET_SOURCE
+    await manage_channels_menu(update, context, channel_type)
+    return MANAGE_SOURCE if channel_type == 'source' else MANAGE_DEST
 
-async def get_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await channel_handler(update, context, "destination")
-    await update.message.reply_text("Hedef kanallar güncellendi. Başka ekleyebilir veya /ayarla ile menüye dönebilirsiniz.")
-    return GET_DEST
+async def add_source_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    return await add_channel_handler(update, context, 'source')
+
+async def add_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    return await add_channel_handler(update, context, 'dest')
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("❌ İşlem iptal edildi.")
@@ -365,7 +438,7 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_caption = await enhance_text_with_gemini_smarter(message.caption)
         elif photo_bytes and bot_config["ai_image_analysis_enabled"]:
             final_caption = await generate_caption_from_image_smarter(photo_bytes)
-        else: # AI kapalıysa veya sadece metin varsa
+        else:
              final_caption = message.caption or message.text or ""
              if "@KRBRZ063" not in final_caption:
                  final_caption += "\n\n@KRBRZ063 #KRBRZ"
@@ -404,11 +477,13 @@ def main():
         entry_points=[CommandHandler("ayarla", setup_command)],
         states={
             SETUP_MENU: [CallbackQueryHandler(setup_menu_handler)],
-            GET_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_source_handler)],
-            GET_DEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_dest_handler)],
-            GET_PERSONA: [CallbackQueryHandler(persona_handler, pattern='^persona_')]
+            GET_PERSONA: [CallbackQueryHandler(persona_handler)],
+            MANAGE_SOURCE: [CallbackQueryHandler(source_menu_handler)],
+            MANAGE_DEST: [CallbackQueryHandler(dest_menu_handler)],
+            ADD_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)],
+            ADD_DEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)],
         },
-        fallbacks=[CallbackQueryHandler(setup_command, pattern='^back_to_menu'), CommandHandler("iptal", cancel_setup)],
+        fallbacks=[CommandHandler("iptal", cancel_setup)],
         per_message=False
     )
     
@@ -422,3 +497,4 @@ if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
     logger.info(f"🌐 Flask sunucusu {PORT} portunda başlatıldı.")
     main()
+
