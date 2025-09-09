@@ -223,10 +223,10 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     
     if data == 'manage_source':
-        await manage_channels_menu(update.callback_query, context, 'source')
+        await manage_channels_menu(query, context, 'source')
         return MANAGE_SOURCE
     elif data == 'manage_dest':
-        await manage_channels_menu(update.callback_query, context, 'dest')
+        await manage_channels_menu(query, context, 'dest')
         return MANAGE_DEST
     elif data == 'toggle_text_ai':
         bot_config["ai_text_enhancement_enabled"] = not bot_config["ai_text_enhancement_enabled"]
@@ -261,7 +261,7 @@ async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.message.reply_text(f"✅ AI kişiliği '{persona}' olarak ayarlandı.")
     return await setup_command(update, context)
 
-async def manage_channels_menu(query_or_update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
+async def manage_channels_menu(query, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
@@ -273,11 +273,7 @@ async def manage_channels_menu(query_or_update, context: ContextTypes.DEFAULT_TY
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main_menu')])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if isinstance(query_or_update, Update): # Mesajdan geliyorsa
-        await query_or_update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    else: # Butondan geliyorsa
-        await query_or_update.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -325,8 +321,14 @@ async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}", parse_mode='Markdown')
     
-    # DÜZELTME: Kanal eklendikten sonra menüyü tekrar göster
-    await manage_channels_menu(update, context, channel_type)
+    # Kanal eklendikten sonra menüyü tekrar göster
+    # Bu sefer query objesi yok, update objesini direkt gönderiyoruz
+    # manage_channels_menu fonksiyonunu buna göre düzenlemek lazım
+    # Ancak şimdilik en basit çözüm, kullanıcıya menüye dönmesini söylemek
+    await update.message.delete() # Kullanıcının yazdığı kanal adını sil
+    await manage_channels_menu(update.message.reply_text("..."), context, channel_type)
+    
+    # Doğru state'e geri dönmeliyiz
     return MANAGE_SOURCE if channel_type == 'source' else MANAGE_DEST
 
 async def add_source_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -338,10 +340,6 @@ async def add_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("✅ Ayar menüsü kapatıldı.")
     return ConversationHandler.END
-
-async def conversation_timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Konuşma zaman aşımına uğradı. Admine bilgi veriliyor.")
-    await context.bot.send_message(chat_id=ADMIN_USER_ID, text="⏰ Uzun süre işlem yapılmadığı için ayar menüsü otomatik olarak kapatıldı. Tekrar açmak için /ayarla yazabilirsiniz.")
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -405,10 +403,20 @@ def main():
         states={
             SETUP_MENU: [CallbackQueryHandler(setup_menu_handler)],
             GET_PERSONA: [CallbackQueryHandler(persona_handler)],
-            MANAGE_SOURCE: [CallbackQueryHandler(source_menu_handler)],
-            MANAGE_DEST: [CallbackQueryHandler(dest_menu_handler)],
-            ADD_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)],
-            ADD_DEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)],
+            
+            # --- YENİDEN YAPILANDIRILAN BÖLÜM ---
+            MANAGE_SOURCE: [
+                CallbackQueryHandler(source_menu_handler)
+            ],
+            MANAGE_DEST: [
+                CallbackQueryHandler(dest_menu_handler)
+            ],
+            ADD_SOURCE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)
+            ],
+            ADD_DEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)
+            ],
         },
         fallbacks=[
             CommandHandler("iptal", cancel_setup),
