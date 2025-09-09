@@ -190,7 +190,7 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
 
 # --- SON VE KARARLI KURULUM SİHİRBAZI ---
-(MENU, PERSONA, MANAGE_CHANNELS, ADD_CHANNEL) = map(chr, range(4))
+(MENU, PERSONA, CHANNELS, ADD_CHANNEL) = map(chr, range(4))
 
 async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_ai_status = "✅ Aktif" if bot_config["ai_text_enhancement_enabled"] else "❌ Pasif"
@@ -206,7 +206,7 @@ async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Çıkış", callback_data='exit')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**\n\nYapay zeka ayarlarını ve kanal yapılandırmasını buradan yönetin."
+    content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
     
     if update.callback_query:
         await update.callback_query.edit_message_text(content, reply_markup=reply_markup, parse_mode='Markdown')
@@ -227,7 +227,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if data in ['source', 'dest']:
         context.user_data['channel_type'] = data
         await display_channels_menu(update, context)
-        return MANAGE_CHANNELS
+        return CHANNELS
     elif data == 'persona':
         await display_persona_menu(update, context)
         return PERSONA
@@ -250,14 +250,13 @@ async def display_channels_menu(update: Update, context: ContextTypes.DEFAULT_TY
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
-    text = f"⚙️ **{title} Kanalları Yönetimi**\n\nMevcut kanallar:"
-    if not channels: text += "\n\n_Henüz kanal eklenmemiş._"
+    text = f"⚙️ **{title} Kanalları Yönetimi**"
     keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {ch}", callback_data=ch)] for ch in channels]
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data='add_new')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main')])
     await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-async def manage_channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -277,7 +276,7 @@ async def manage_channels_handler(update: Update, context: ContextTypes.DEFAULT_
             bot_config[config_key].remove(channel_to_remove)
             save_config()
         await display_channels_menu(update, context)
-        return MANAGE_CHANNELS
+        return CHANNELS
         
 async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     channel = update.message.text.strip()
@@ -291,7 +290,7 @@ async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         save_config()
     
     await display_channels_menu(update, context)
-    return MANAGE_CHANNELS
+    return CHANNELS
 
 async def display_persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -383,7 +382,7 @@ def main():
         states={
             MENU: [CallbackQueryHandler(main_menu_handler)],
             PERSONA: [CallbackQueryHandler(persona_handler)],
-            MANAGE_CHANNELS: [CallbackQueryHandler(manage_channels_handler)],
+            CHANNELS: [CallbackQueryHandler(channels_handler)],
             ADD_CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_channel_handler)],
         },
         fallbacks=[CommandHandler("iptal", cancel_setup)],
