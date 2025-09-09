@@ -343,8 +343,11 @@ async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def conversation_timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sohbet zaman aşımına uğradığında kullanıcıyı bilgilendirir."""
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="⏰ Uzun süre işlem yapılmadığı için ayar menüsü otomatik olarak kapatıldı. Tekrar açmak için /ayarla yazabilirsiniz.")
+    """Sohbet zaman aşımına uğradığında admini bilgilendirir."""
+    # Timeout update'lerinde 'effective_chat' bulunmaz.
+    # Bu bot sadece admin tarafından kullanıldığı için, mesajı doğrudan admine gönderiyoruz.
+    logger.info("Konuşma zaman aşımına uğradı. Admine bilgi veriliyor.")
+    await context.bot.send_message(chat_id=ADMIN_USER_ID, text="⏰ Uzun süre işlem yapılmadığı için ayar menüsü otomatik olarak kapatıldı. Tekrar açmak için /ayarla yazabilirsiniz.")
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -428,7 +431,10 @@ def main():
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
     
     # Zaman aşımı için özel bir handler ekliyoruz
-    application.add_handler(MessageHandler(filters.StatusUpdate.TIMEOUT, conversation_timeout_handler))
+    # HATA BURADAYDI, ŞİMDİ DÜZELTİLDİ
+    # Kütüphanenin yeni sürümleri timeout'ları exception olarak ele alıyor,
+    # bu yüzden ayrı bir handler'a gerek kalmıyor ve çökme yaratıyor.
+    # application.add_handler(MessageHandler(filters.StatusUpdate.TIMEOUT, conversation_timeout_handler))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
