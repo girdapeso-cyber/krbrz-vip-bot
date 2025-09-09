@@ -211,9 +211,12 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     message_content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**\n\nYapay zeka ayarlarını ve kanal yapılandırmasını buradan yönetin."
     
     if update.message:
-        await update.message.reply_text(message_content, reply_markup=reply_markup, parse_mode='Markdown')
+        # Menü mesajını sakla ki daha sonra silebilelim
+        sent_message = await update.message.reply_text(message_content, reply_markup=reply_markup, parse_mode='Markdown')
+        context.user_data['menu_message_id'] = sent_message.message_id
     elif update.callback_query:
         await update.callback_query.edit_message_text(message_content, reply_markup=reply_markup, parse_mode='Markdown')
+        context.user_data['menu_message_id'] = update.callback_query.message.message_id
             
     return SETUP_MENU
 
@@ -223,10 +226,10 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     
     if data == 'manage_source':
-        await manage_channels_menu(query, context, 'source')
+        await display_channels_menu(update, context, 'source')
         return MANAGE_SOURCE
     elif data == 'manage_dest':
-        await manage_channels_menu(query, context, 'dest')
+        await display_channels_menu(update, context, 'dest')
         return MANAGE_DEST
     elif data == 'toggle_text_ai':
         bot_config["ai_text_enhancement_enabled"] = not bot_config["ai_text_enhancement_enabled"]
@@ -246,6 +249,8 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == 'exit_setup':
         await query.edit_message_text("✅ Ayarlar kaydedildi. Bot çalışıyor!")
         save_config()
+        if 'menu_message_id' in context.user_data:
+            del context.user_data['menu_message_id']
         return ConversationHandler.END
     
     save_config()
@@ -261,7 +266,8 @@ async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.message.reply_text(f"✅ AI kişiliği '{persona}' olarak ayarlandı.")
     return await setup_command(update, context)
 
-async def manage_channels_menu(query, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
+async def display_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
+    """Kanal yönetimi menüsünü gösterir/günceller."""
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
@@ -273,7 +279,27 @@ async def manage_channels_menu(query, context: ContextTypes.DEFAULT_TYPE, channe
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main_menu')])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    # Menü mesajını düzenle
+    menu_message_id = context.user_data.get('menu_message_id')
+    if menu_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=menu_message_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.warning(f"Menü mesajı düzenlenemedi, yeni mesaj gönderiliyor: {e}")
+            sent_message = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            context.user_data['menu_message_id'] = sent_message.message_id
 
 async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -287,7 +313,7 @@ async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if channel_name in bot_config['source_channels']:
             bot_config['source_channels'].remove(channel_name)
             save_config()
-        await manage_channels_menu(query, context, 'source')
+        await display_channels_menu(update, context, 'source')
         return MANAGE_SOURCE
     elif data == 'back_to_main_menu':
         await setup_command(update, context)
@@ -305,30 +331,33 @@ async def dest_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if channel_name in bot_config['destination_channels']:
             bot_config['destination_channels'].remove(channel_name)
             save_config()
-        await manage_channels_menu(query, context, 'dest')
+        await display_channels_menu(update, context, 'dest')
         return MANAGE_DEST
     elif data == 'back_to_main_menu':
         await setup_command(update, context)
         return SETUP_MENU
 
 async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str) -> int:
+    """Kanal ekler ve menüyü günceller."""
     channel = update.message.text.strip()
     config_key = f"{channel_type}_channels"
+    
+    # Kullanıcının gönderdiği kanal adı mesajını sil
+    await update.message.delete()
+
     if channel not in bot_config[config_key]:
         bot_config[config_key].append(channel)
         save_config()
-        await update.message.reply_text(f"✅ Kanal eklendi: {channel}", parse_mode='Markdown')
     else:
-        await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}", parse_mode='Markdown')
+        # Geçici bir uyarı mesajı gönder ve kısa süre sonra sil
+        warning_msg = await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}", parse_mode='Markdown')
+        await asyncio.sleep(3)
+        await warning_msg.delete()
     
-    # Kanal eklendikten sonra menüyü tekrar göster
-    # Bu sefer query objesi yok, update objesini direkt gönderiyoruz
-    # manage_channels_menu fonksiyonunu buna göre düzenlemek lazım
-    # Ancak şimdilik en basit çözüm, kullanıcıya menüye dönmesini söylemek
-    await update.message.delete() # Kullanıcının yazdığı kanal adını sil
-    await manage_channels_menu(update.message.reply_text("..."), context, channel_type)
+    # Güncellenmiş kanal menüsünü göster
+    await display_channels_menu(update, context, channel_type)
     
-    # Doğru state'e geri dönmeliyiz
+    # Doğru state'e geri dönmeliyiz ki menü butonları çalışsın
     return MANAGE_SOURCE if channel_type == 'source' else MANAGE_DEST
 
 async def add_source_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -339,6 +368,8 @@ async def add_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("✅ Ayar menüsü kapatıldı.")
+    if 'menu_message_id' in context.user_data:
+            del context.user_data['menu_message_id']
     return ConversationHandler.END
 
 # --- Ana Mesaj Yönlendirici ---
@@ -403,20 +434,10 @@ def main():
         states={
             SETUP_MENU: [CallbackQueryHandler(setup_menu_handler)],
             GET_PERSONA: [CallbackQueryHandler(persona_handler)],
-            
-            # --- YENİDEN YAPILANDIRILAN BÖLÜM ---
-            MANAGE_SOURCE: [
-                CallbackQueryHandler(source_menu_handler)
-            ],
-            MANAGE_DEST: [
-                CallbackQueryHandler(dest_menu_handler)
-            ],
-            ADD_SOURCE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)
-            ],
-            ADD_DEST: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)
-            ],
+            MANAGE_SOURCE: [CallbackQueryHandler(source_menu_handler)],
+            MANAGE_DEST: [CallbackQueryHandler(dest_menu_handler)],
+            ADD_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)],
+            ADD_DEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)],
         },
         fallbacks=[
             CommandHandler("iptal", cancel_setup),
