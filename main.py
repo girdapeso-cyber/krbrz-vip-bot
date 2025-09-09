@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 KRBRZ VIP Bot - Gelişmiş AI ile Telegram Botu
-Bu versiyon, ayar menüsünün kilitlenmesini engellemek için kalıcı durum yönetimi kullanır.
+Bu versiyon, ayar menüsünün kilitlenmesini engellemek için profesyonel ve durumsuz bir yapı kullanır.
 """
 
 # --- Gerekli Kütüphaneler ---
@@ -17,7 +17,7 @@ from threading import Thread
 from typing import List, Dict
 import httpx
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes,
     CallbackQueryHandler
@@ -70,7 +70,6 @@ def load_config():
         "ai_persona": "Agresif Pazarlamacı",
         "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
         "statistics_enabled": True,
-        "admin_state": {} # YENİ: Kalıcı durum yönetimi için
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -162,7 +161,6 @@ def admin_only(func):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
         if user_id != ADMIN_USER_ID:
-            # Komutu gönderen admin değilse, hiçbir şey yapma.
             return
         return await func(update, context, *args, **kwargs)
     return wrapped
@@ -190,9 +188,9 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
     await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
 
-# --- YENİ PROFESYONEL AYAR MENÜSÜ SİSTEMİ (KALICI DURUM YÖNETİMİ) ---
+# --- YENİ PROFESYONEL AYAR MENÜSÜ SİSTEMİ (ForceReply ile) ---
 
-async def get_main_menu():
+async def get_main_menu_content():
     text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
     image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
@@ -206,17 +204,17 @@ async def get_main_menu():
     ]
     return text, InlineKeyboardMarkup(keyboard)
 
-async def get_channels_menu(channel_type: str):
+async def get_channels_menu_content(channel_type: str):
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
-    text = f"⚙️ **{title} Kanalları Yönetimi**"
+    text = f"⚙️ **{title} Kanalları Yönetimi**\n\nMevcut kanallar:\n" + ("\n".join(f"`{ch}`" for ch in channels) or "_Boş_")
     keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {ch}", callback_data=f'remove_{channel_type}_{ch}')] for ch in channels]
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
 
-async def get_persona_menu():
+async def get_persona_menu_content():
     text = "🎭 Yapay zeka için bir kişilik seçin:"
     keyboard = [
         [InlineKeyboardButton("Agresif Pazarlamacı", callback_data='set_persona_Agresif Pazarlamacı')],
@@ -228,19 +226,14 @@ async def get_persona_menu():
 
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Eğer bot bir kanal adı bekliyorsa, bu durumu temizle.
-    if 'admin_state' in bot_config and bot_config['admin_state'].get('waiting_for'):
-        del bot_config['admin_state']
-        save_config()
-
-    text, reply_markup = await get_main_menu()
+    if 'menu_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data.pop('menu_message_id'))
+        except Exception: pass
+    
+    text, reply_markup = await get_main_menu_content()
     sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    # Kalıcı durum yönetimi için menü bilgisini config'e yaz.
-    bot_config['admin_state'] = {
-        'menu_chat_id': sent_message.chat.id,
-        'menu_message_id': sent_message.message_id
-    }
-    save_config()
+    context.user_data['menu_message_id'] = sent_message.message_id
 
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -248,12 +241,18 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     
     if data == 'menu_main':
-        text, reply_markup = await get_main_menu()
+        text, reply_markup = await get_main_menu_content()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
     elif data.startswith('menu_channels_'):
         channel_type = data.split('_')[-1]
-        text, reply_markup = await get_channels_menu(channel_type)
+        text, reply_markup = await get_channels_menu_content(channel_type)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
     elif data == 'menu_persona':
-        text, reply_markup = await get_persona_menu()
+        text, reply_markup = await get_persona_menu_content()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
     elif data.startswith('toggle_'):
         key_part = data.replace('toggle_', '')
         if key_part == "watermark":
@@ -261,69 +260,75 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             bot_config[f"{key_part}_enabled"] = not bot_config[f"{key_part}_enabled"]
         save_config()
-        text, reply_markup = await get_main_menu()
+        text, reply_markup = await get_main_menu_content()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
     elif data.startswith('set_persona_'):
         persona = data.replace('set_persona_', '')
         bot_config["ai_persona"] = persona
         save_config()
-        text, reply_markup = await get_main_menu()
+        text, reply_markup = await get_main_menu_content()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
     elif data.startswith('add_'):
         channel_type = data.replace('add_', '')
-        bot_config['admin_state']['waiting_for'] = channel_type
-        save_config()
         title = "Kaynak" if channel_type == 'source' else "Hedef"
-        text = f"➕ Eklenecek yeni **{title}** kanalının adını yazıp gönderin."
-        reply_markup = None # Sadece yazı, buton yok
+        
+        # Menüyü sil ve ForceReply ile yeni mesaj gönder
+        await query.message.delete()
+        context.user_data.pop('menu_message_id', None)
+        
+        reply_text = f"➕ Eklenecek yeni **{title}** kanalının adını yazıp bu mesaja yanıt verin."
+        sent_reply_message = await query.message.reply_text(
+            reply_text,
+            reply_markup=ForceReply(selective=True),
+            parse_mode='Markdown'
+        )
+        context.user_data['force_reply_info'] = {
+            'type': f'add_channel_{channel_type}',
+            'message_id': sent_reply_message.message_id
+        }
+
     elif data.startswith('remove_'):
         _, channel_type, channel_name = data.split('_', 2)
         config_key = f"{channel_type}_channels"
         if channel_name in bot_config[config_key]:
             bot_config[config_key].remove(channel_name)
             save_config()
-        text, reply_markup = await get_channels_menu(channel_type)
-    elif data == 'menu_close':
-        await query.edit_message_text("✅ Menü kapatıldı.")
-        if 'admin_state' in bot_config:
-            del bot_config['admin_state']
-            save_config()
-        return
+        text, reply_markup = await get_channels_menu_content(channel_type)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-    # Menü mesajını güncelle
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    elif data == 'menu_close':
+        await query.message.delete()
+        context.user_data.pop('menu_message_id', None)
 
 @admin_only
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_state = bot_config.get('admin_state', {})
-    if admin_state.get('waiting_for'):
-        channel_type = admin_state['waiting_for']
+async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.reply_to_message or 'force_reply_info' not in context.user_data:
+        return
+
+    reply_info = context.user_data['force_reply_info']
+    
+    if update.message.reply_to_message.message_id != reply_info['message_id']:
+        return
+
+    if reply_info['type'].startswith('add_channel_'):
+        channel_type = reply_info['type'].replace('add_channel_', '')
         channel_name = update.message.text.strip()
         config_key = f"{channel_type}_channels"
-        
+
         if channel_name not in bot_config[config_key]:
             bot_config[config_key].append(channel_name)
-
-        # Bekleme durumunu temizle
-        del bot_config['admin_state']['waiting_for']
-        save_config()
-
-        await update.message.delete()
+            save_config()
         
-        # Menüyü yenile
-        text, reply_markup = await get_channels_menu(channel_type)
-        await context.bot.edit_message_text(
-            text=text,
-            chat_id=admin_state['menu_chat_id'],
-            message_id=admin_state['menu_message_id'],
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=reply_info['message_id'])
+        await update.message.delete()
+
+        del context.user_data['force_reply_info']
+        await setup_command(update, context)
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Metin handler'ının bu mesajları görmemesi için admin kontrolü
-    if update.effective_user and update.effective_user.id == ADMIN_USER_ID:
-        return
-        
     if bot_config["is_paused"]: return
     message = update.channel_post
     if not message: return
@@ -385,11 +390,8 @@ def main():
     application.add_handler(CommandHandler("durdur", pause_command))
     
     application.add_handler(CallbackQueryHandler(menu_callback_handler))
+    application.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, reply_handler))
     
-    # Sadece admin'den gelen metin mesajlarını dinle
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
-    # Kanal post'larını dinle
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
