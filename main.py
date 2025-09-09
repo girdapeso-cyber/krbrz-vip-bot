@@ -196,7 +196,7 @@ async def get_main_menu_content():
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
     text = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
     keyboard = [
-        [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='menu_channels_source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='menu_channels_dest')],
+        [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='menu_channels_source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='menu_channels_destination')],
         [InlineKeyboardButton(f"{text_ai_status} Akıllı Metin", callback_data='toggle_text_ai'), InlineKeyboardButton(f"{image_ai_status} Akıllı Görüntü", callback_data='toggle_image_ai')],
         [InlineKeyboardButton(f"🎭 AI Kişiliği: {bot_config['ai_persona']}", callback_data='menu_persona')],
         [InlineKeyboardButton(f"{wm_status} Filigran", callback_data='toggle_watermark')],
@@ -274,7 +274,6 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         channel_type = data.replace('add_', '')
         title = "Kaynak" if channel_type == 'source' else "Hedef"
         
-        # Menüyü sil ve ForceReply ile yeni mesaj gönder
         await query.message.delete()
         context.user_data.pop('menu_message_id', None)
         
