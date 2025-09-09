@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes,
-    ConversationHandler, CallbackQueryHandler
+    CallbackQueryHandler
 )
 from flask import Flask
 from functools import lru_cache
@@ -159,8 +159,9 @@ async def apply_watermark(photo_bytes: bytes) -> bytes:
 # --- Admin ve Ayar Komutları ---
 def admin_only(func):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        if update.effective_user.id != ADMIN_USER_ID:
-            await update.message.reply_text("❌ Bu komut sadece admin tarafından kullanılabilir.")
+        user_id = update.effective_user.id
+        if user_id != ADMIN_USER_ID:
+            await context.bot.send_message(chat_id=user_id, text="❌ Bu komut sadece admin tarafından kullanılabilir.")
             return
         return await func(update, context, *args, **kwargs)
     return wrapped
@@ -172,8 +173,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "İşte kullanabileceğiniz komutlar:\n"
         "🔹 `/ayarla` - Botun yönetim panelini açar.\n"
         "🔹 `/durum` - Botun çalışıp çalışmadığını kontrol eder.\n"
-        "🔹 `/durdur` - Botun mesaj iletmesini duraklatır/başlatır.\n"
-        "🔹 `/iptal` - Ayar menüsündeki bir işlemi iptal eder."
+        "🔹 `/durdur` - Botun mesaj iletmesini duraklatır/başlatır."
         , parse_mode='Markdown'
     )
 
@@ -189,159 +189,139 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
     await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
 
-# --- SON VE KARARLI KURULUM SİHİRBAZI ---
-(MENU, PERSONA, CHANNELS, ADD_CHANNEL) = map(chr, range(4))
+# --- YENİ PROFESYONEL AYAR MENÜSÜ SİSTEMİ ---
 
-async def update_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, text: str, reply_markup: InlineKeyboardMarkup):
-    """Menü mesajını güvenli bir şekilde günceller."""
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Menü güncellenemedi: {e}")
-
-async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text_ai_status = "✅ Aktif" if bot_config["ai_text_enhancement_enabled"] else "❌ Pasif"
-    image_ai_status = "✅ Aktif" if bot_config["ai_image_analysis_enabled"] else "❌ Pasif"
-    wm_status = "✅ Aktif" if bot_config['watermark']['enabled'] else "❌ Pasif"
+async def get_main_menu():
+    """Ana menünün içeriğini ve butonlarını oluşturur."""
+    text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
+    image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
+    wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
+    text = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
     keyboard = [
-        [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='dest')],
-        [InlineKeyboardButton(f"🤖 Akıllı Metin: {text_ai_status}", callback_data='toggle_text_ai')],
-        [InlineKeyboardButton(f"🖼️ Akıllı Görüntü: {image_ai_status}", callback_data='toggle_image_ai')],
-        [InlineKeyboardButton(f"🎭 AI Kişiliği: {bot_config['ai_persona']}", callback_data='persona')],
-        [InlineKeyboardButton(f"💧 Filigran: {wm_status}", callback_data='toggle_watermark')],
-        [InlineKeyboardButton("✅ Çıkış", callback_data='exit')],
+        [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='menu_channels_source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='menu_channels_dest')],
+        [InlineKeyboardButton(f"{text_ai_status} Akıllı Metin", callback_data='toggle_text_ai'), InlineKeyboardButton(f"{image_ai_status} Akıllı Görüntü", callback_data='toggle_image_ai')],
+        [InlineKeyboardButton(f"🎭 AI Kişiliği: {bot_config['ai_persona']}", callback_data='menu_persona')],
+        [InlineKeyboardButton(f"{wm_status} Filigran", callback_data='toggle_watermark')],
+        [InlineKeyboardButton("✅ Menüyü Kapat", callback_data='menu_close')],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
-    
-    # /ayarla komutu ile gelindiyse, eski menüyü silip yenisini gönder.
-    if update.message:
-        if 'menu_message_id' in context.user_data:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data['menu_message_id'])
-            except Exception: pass
-        sent_message = await update.message.reply_text(content, reply_markup=reply_markup, parse_mode='Markdown')
-        context.user_data['menu_message_id'] = sent_message.message_id
-        context.user_data['menu_chat_id'] = sent_message.chat_id
-    else: # Buton ile gelindiyse, mevcut menüyü düzenle.
-        await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], content, reply_markup)
+    return text, InlineKeyboardMarkup(keyboard)
 
-@admin_only
-async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    await display_main_menu(update, context)
-    return MENU
-
-async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data in ['source', 'dest']:
-        context.user_data['channel_type'] = data
-        await display_channels_menu(update, context)
-        return CHANNELS
-    elif data == 'persona':
-        await display_persona_menu(update, context)
-        return PERSONA
-    elif data == 'exit':
-        await query.edit_message_text("✅ Ayarlar kaydedildi. Bot çalışıyor!")
-        if 'menu_message_id' in context.user_data: del context.user_data['menu_message_id']
-        return ConversationHandler.END
-    elif data.startswith('toggle_'):
-        key_part = data.replace('toggle_', '')
-        if key_part == "watermark":
-             bot_config['watermark']['enabled'] = not bot_config['watermark']['enabled']
-        else:
-             bot_config[f"{key_part}_enabled"] = not bot_config[f"{key_part}_enabled"]
-        save_config()
-        await display_main_menu(update, context)
-        return MENU
-
-async def display_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    channel_type = context.user_data['channel_type']
+async def get_channels_menu(channel_type: str):
+    """Kanal yönetimi menüsünü oluşturur."""
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
     text = f"⚙️ **{title} Kanalları Yönetimi**"
-    keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {ch}", callback_data=ch)] for ch in channels]
-    keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data='add_new')])
-    keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main')])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], text, reply_markup)
+    keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {ch}", callback_data=f'remove_{channel_type}_{ch}')] for ch in channels]
+    keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
+    keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
+    return text, InlineKeyboardMarkup(keyboard)
 
-async def channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+async def get_persona_menu():
+    """AI kişilik menüsünü oluşturur."""
+    text = "🎭 Yapay zeka için bir kişilik seçin:"
+    keyboard = [
+        [InlineKeyboardButton("Agresif Pazarlamacı", callback_data='set_persona_Agresif Pazarlamacı')],
+        [InlineKeyboardButton("Profesyonel Satıcı", callback_data='set_persona_Profesyonel Satıcı')],
+        [InlineKeyboardButton("Eğlenceli Oyuncu", callback_data='set_persona_Eğlenceli Oyuncu')],
+        [InlineKeyboardButton("⬅️ Geri", callback_data='menu_main')],
+    ]
+    return text, InlineKeyboardMarkup(keyboard)
+
+@admin_only
+async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ayar menüsünü ilk kez gönderir."""
+    if 'menu_message' in context.user_data:
+        try:
+            await context.bot.delete_message(chat_id=context.user_data['menu_message']['chat_id'], message_id=context.user_data['menu_message']['message_id'])
+        except Exception: pass
+    
+    text, reply_markup = await get_main_menu()
+    sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    context.user_data['menu_message'] = {'chat_id': sent_message.chat.id, 'message_id': sent_message.message_id}
+
+async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tüm menü butonlarını yöneten ana fonksiyon."""
     query = update.callback_query
     await query.answer()
     data = query.data
     
-    if data == 'add_new':
-        title = "Kaynak" if context.user_data['channel_type'] == 'source' else "Hedef"
-        text = f"📡 Eklenecek yeni **{title}** kanalının adını yazın (@ile veya ID olarak)."
-        await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], text, None) # Butonları kaldır
-        return ADD_CHANNEL
-    elif data == 'back_to_main':
-        await display_main_menu(update, context)
-        return MENU
-    else:
-        channel_to_remove = data
-        config_key = f"{context.user_data['channel_type']}_channels"
-        if channel_to_remove in bot_config[config_key]:
-            bot_config[config_key].remove(channel_to_remove)
-            save_config()
-        await display_channels_menu(update, context)
-        return CHANNELS
-        
-async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    channel = update.message.text.strip()
-    channel_type = context.user_data['channel_type']
-    config_key = f"{channel_type}_channels"
-    
-    await update.message.delete()
+    # Ana Menüye Dönüş
+    if data == 'menu_main':
+        text, reply_markup = await get_main_menu()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-    if channel not in bot_config[config_key]:
-        bot_config[config_key].append(channel)
+    # Kanalları Yönet
+    elif data.startswith('menu_channels_'):
+        channel_type = data.split('_')[-1]
+        text, reply_markup = await get_channels_menu(channel_type)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    # Persona Menüsü
+    elif data == 'menu_persona':
+        text, reply_markup = await get_persona_menu()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    # Ayarları Aç/Kapat
+    elif data.startswith('toggle_'):
+        key_part = data.replace('toggle_', '')
+        if key_part == "watermark":
+            bot_config['watermark']['enabled'] = not bot_config['watermark']['enabled']
+        else:
+            bot_config[f"{key_part}_enabled"] = not bot_config[f"{key_part}_enabled"]
         save_config()
-    
-    await display_channels_menu(update, context)
-    return CHANNELS
+        text, reply_markup = await get_main_menu()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-async def display_persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Agresif Pazarlamacı", callback_data='Agresif Pazarlamacı')],
-        [InlineKeyboardButton("Profesyonel Satıcı", callback_data='Profesyonel Satıcı')],
-        [InlineKeyboardButton("Eğlenceli Oyuncu", callback_data='Eğlenceli Oyuncu')],
-        [InlineKeyboardButton("⬅️ Geri", callback_data='back_to_main')],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], "🎭 Yapay zeka için bir kişilik seçin:", reply_markup)
+    # Persona Seçimi
+    elif data.startswith('set_persona_'):
+        persona = data.replace('set_persona_', '')
+        bot_config["ai_persona"] = persona
+        save_config()
+        text, reply_markup = await get_main_menu()
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'back_to_main':
-        await display_main_menu(update, context)
-        return MENU
-    
-    persona = query.data
-    bot_config["ai_persona"] = persona
-    save_config()
-    await display_main_menu(update, context)
-    return MENU
+    # Kanal Ekleme İsteği
+    elif data.startswith('add_'):
+        channel_type = data.replace('add_', '')
+        context.user_data['waiting_for_channel'] = channel_type
+        title = "Kaynak" if channel_type == 'source' else "Hedef"
+        await query.edit_message_text(f"➕ Eklenecek yeni **{title}** kanalının adını yazıp gönderin.", parse_mode='Markdown')
 
-async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("✅ Ayar menüsü kapatıldı.")
-    if 'menu_message_id' in context.user_data:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data['menu_message_id'])
-        except Exception: pass
-        del context.user_data['menu_message_id']
-    return ConversationHandler.END
+    # Kanal Silme
+    elif data.startswith('remove_'):
+        _, channel_type, channel_name = data.split('_', 2)
+        config_key = f"{channel_type}_channels"
+        if channel_name in bot_config[config_key]:
+            bot_config[config_key].remove(channel_name)
+            save_config()
+        text, reply_markup = await get_channels_menu(channel_type)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    # Menüyü Kapat
+    elif data == 'menu_close':
+        await query.edit_message_text("✅ Menü kapatıldı.")
+        if 'menu_message' in context.user_data: del context.user_data['menu_message']
+
+async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Beklenen kanal adını alır ve ekler."""
+    if 'waiting_for_channel' in context.user_data:
+        channel_type = context.user_data['waiting_for_channel']
+        channel_name = update.message.text.strip()
+        config_key = f"{channel_type}_channels"
+        
+        if channel_name not in bot_config[config_key]:
+            bot_config[config_key].append(channel_name)
+            save_config()
+
+        await update.message.delete()
+        del context.user_data['waiting_for_channel']
+        
+        # Menüyü yenile
+        text, reply_markup = await get_channels_menu(channel_type)
+        menu_msg = context.user_data['menu_message']
+        await context.bot.edit_message_text(text, chat_id=menu_msg['chat_id'], message_id=menu_msg['message_id'], reply_markup=reply_markup, parse_mode='Markdown')
+
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -400,23 +380,19 @@ def main():
     logger.info("🚀 KRBRZ VIP Bot başlatılıyor...")
     application = Application.builder().token(BOT_TOKEN).build()
     
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("ayarla", setup_command)],
-        states={
-            MENU: [CallbackQueryHandler(main_menu_handler)],
-            PERSONA: [CallbackQueryHandler(persona_handler)],
-            CHANNELS: [CallbackQueryHandler(channels_handler)],
-            ADD_CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_channel_handler)],
-        },
-        fallbacks=[CommandHandler("iptal", cancel_setup)],
-        conversation_timeout=300.0,
-        allow_reentry=True
-    )
-    
+    # ConversationHandler yerine daha basit handler'lar kullanıyoruz.
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("ayarla", setup_command))
     application.add_handler(CommandHandler("durum", status_command))
     application.add_handler(CommandHandler("durdur", pause_command))
-    application.add_handler(conv_handler)
+    
+    # Tüm menü butonlarını bu tek handler yönetecek.
+    application.add_handler(CallbackQueryHandler(menu_callback_handler))
+    
+    # Sadece kanal adı beklerken çalışacak olan handler.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, add_channel_handler))
+    
+    # Mesaj yönlendirici.
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
