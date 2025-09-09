@@ -190,11 +190,9 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
 
 # --- SON VE KARARLI KURULUM SİHİRBAZI ---
-(MENU, PERSONA, 
- MANAGE_CHANNELS, ADD_CHANNEL) = map(chr, range(4))
+(MENU, PERSONA, MANAGE_CHANNELS, ADD_CHANNEL) = map(chr, range(4))
 
-async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, message_text: str = None):
-    """Ana menüyü gösterir veya günceller."""
+async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_ai_status = "✅ Aktif" if bot_config["ai_text_enhancement_enabled"] else "❌ Pasif"
     image_ai_status = "✅ Aktif" if bot_config["ai_image_analysis_enabled"] else "❌ Pasif"
     wm_status = "✅ Aktif" if bot_config['watermark']['enabled'] else "❌ Pasif"
@@ -208,12 +206,13 @@ async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         [InlineKeyboardButton("✅ Çıkış", callback_data='exit')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    content = message_text or "🚀 **KRBRZ VIP Bot Yönetim Paneli**\n\nYapay zeka ayarlarını ve kanal yapılandırmasını buradan yönetin."
+    content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**\n\nYapay zeka ayarlarını ve kanal yapılandırmasını buradan yönetin."
     
     if update.callback_query:
         await update.callback_query.edit_message_text(content, reply_markup=reply_markup, parse_mode='Markdown')
     else:
-        await update.message.reply_text(content, reply_markup=reply_markup, parse_mode='Markdown')
+        sent_message = await update.message.reply_text(content, reply_markup=reply_markup, parse_mode='Markdown')
+        context.user_data['menu_message_id'] = sent_message.message_id
 
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -234,13 +233,14 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return PERSONA
     elif data == 'exit':
         await query.edit_message_text("✅ Ayarlar kaydedildi. Bot çalışıyor!")
+        if 'menu_message_id' in context.user_data: del context.user_data['menu_message_id']
         return ConversationHandler.END
     elif data.startswith('toggle_'):
-        key = data.replace('toggle_', '') + "_enabled"
-        if key == "watermark_enabled": # Filigran için özel durum
+        key_part = data.replace('toggle_', '')
+        if key_part == "watermark":
              bot_config['watermark']['enabled'] = not bot_config['watermark']['enabled']
         else:
-             bot_config[key] = not bot_config[key]
+             bot_config[f"{key_part}_enabled"] = not bot_config[f"{key_part}_enabled"]
         save_config()
         await display_main_menu(update, context)
         return MENU
@@ -270,13 +270,13 @@ async def manage_channels_handler(update: Update, context: ContextTypes.DEFAULT_
     elif data == 'back_to_main':
         await display_main_menu(update, context)
         return MENU
-    else: # Kanal silme
+    else:
         channel_to_remove = data
         config_key = f"{channel_type}_channels"
         if channel_to_remove in bot_config[config_key]:
             bot_config[config_key].remove(channel_to_remove)
             save_config()
-        await display_channels_menu(update, context) # Menüyü yenile
+        await display_channels_menu(update, context)
         return MANAGE_CHANNELS
         
 async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -284,11 +284,12 @@ async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     channel_type = context.user_data['channel_type']
     config_key = f"{channel_type}_channels"
     
+    await update.message.delete()
+
     if channel not in bot_config[config_key]:
         bot_config[config_key].append(channel)
         save_config()
     
-    await update.message.delete()
     await display_channels_menu(update, context)
     return MANAGE_CHANNELS
 
@@ -311,11 +312,13 @@ async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     persona = query.data
     bot_config["ai_persona"] = persona
     save_config()
-    await display_main_menu(update, context, message_text=f"✅ AI kişiliği '{persona}' olarak ayarlandı.")
+    await query.message.reply_text(f"✅ AI kişiliği '{persona}' olarak ayarlandı.", parse_mode='Markdown')
+    await display_main_menu(update, context)
     return MENU
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("✅ Ayar menüsü kapatıldı.")
+    if 'menu_message_id' in context.user_data: del context.user_data['menu_message_id']
     return ConversationHandler.END
 
 # --- Ana Mesaj Yönlendirici ---
