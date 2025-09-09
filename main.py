@@ -119,7 +119,8 @@ def load_config():
             "daily_promo_time": "09:00",
             "template_system_enabled": True,
             "statistics_enabled": True,
-            "max_message_length": 60  # Yeni: Mesaj uzunluk sınırı
+            "max_message_length": 25,  # Çok kısa mesajlar
+            "simple_template_mode": False  # Basit template modu
         }
     
     # Add missing keys for backward compatibility
@@ -127,7 +128,8 @@ def load_config():
     config.setdefault("daily_promo_time", "09:00")
     config.setdefault("template_system_enabled", True)
     config.setdefault("statistics_enabled", True)
-    config.setdefault("max_message_length", 60)
+    config.setdefault("simple_template_mode", False)
+    config.setdefault("max_message_length", 25)
     
     return config
 
@@ -137,6 +139,22 @@ def save_config():
     """Save configuration to file"""
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(bot_config, f, indent=4, ensure_ascii=False)
+
+# --- Simple Template Selection Function ---
+def get_simple_template(message_content: str) -> str:
+    """Get simple template based on message content"""
+    content_lower = message_content.lower()
+    
+    if any(word in content_lower for word in ['bypass', 'hack', 'cheat']):
+        return "Bypass aktif 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
+    elif any(word in content_lower for word in ['win', 'zafer', 'chicken', 'dinner']):
+        return "Zafer 👑 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
+    elif any(word in content_lower for word in ['satış', 'sale', 'fiyat', 'price']):
+        return "Satışta 💎 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
+    elif any(word in content_lower for word in ['hafta', 'week']):
+        return "Haftalık 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
+    else:
+        return "Hack hazır ⚡ @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
 
 # --- Enhanced AI Functions ---
 @lru_cache(maxsize=100)
@@ -149,17 +167,13 @@ async def enhance_text_with_gemini(original_text: str) -> str:
     if not GEMINI_API_KEY or not original_text:
         return original_text
     
-    max_length = bot_config.get("max_message_length", 60)
+    max_length = bot_config.get("max_message_length", 25)  # Çok daha kısa!
     
     system_prompt = (
-        "Sen KRBRZ VIP PUBG bypass/hack satış uzmanısın. "
-        f"ÇOK KISA metin yaz (maksimum {max_length} karakter, 1-2 satır). "
-        "Haftalık/aylık paketleri vurgula. "
-        "Aciliyet yarat (sınırlı stok, özel fiyat). "
-        "Sadece bu emojileri kullan: 🔥💎⚡🎯💀👑🚀 "
-        "Hashtag: #KRBRZ_VIP #PUBGBypass #Hack "
-        "Direkt satış odaklı, uzun açıklama yok. "
-        "SADECE kısa satış metni döndür."
+        "Sadece kısa PUBG bypass satış yazısı yaz. "
+        "Örnek: 'Bypass aktif 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve' "
+        "20 kelimeden az. Sadece 🔥⚡👑💎 kullan. "
+        "Hep @KRBRZ063 ve #PUBGHACK #KRBRZ #Zirve ekle. UZUN YAZMA!"
     )
     
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
@@ -167,8 +181,8 @@ async def enhance_text_with_gemini(original_text: str) -> str:
         "contents": [{"parts": [{"text": original_text}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "generationConfig": {
-            "maxOutputTokens": 50,
-            "temperature": 0.7
+            "maxOutputTokens": 20,  # Çok az token
+            "temperature": 0.3  # Daha tutarlı
         }
     }
     
@@ -193,16 +207,13 @@ async def generate_caption_from_image(image_bytes: bytes) -> str:
     if not GEMINI_API_KEY:
         return ""
 
-    max_length = bot_config.get("max_message_length", 60)
+    max_length = bot_config.get("max_message_length", 25)  # Çok kısa!
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
     
     prompt = (
-        f"KRBRZ VIP PUBG bypass/hack satış kanalı için ÇOK KISA başlık yaz (max {max_length} karakter). "
-        "Bu resimde zafer/başarı varsa bypass/hack ürünle bağla. "
-        "Satış odaklı yaz - haftalık/aylık paket tanıt. "
-        "Emojiler: 🔥💎⚡🎯💀👑 "
-        "Hashtag: #KRBRZ_VIP #PUBGBypass #Hack "
-        "Acil satış metni döndür."
+        "PUBG resmi için kısa yorum yaz. "
+        "Örnek: 'Zafer 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve' "
+        "Sadece 🔥⚡👑 kullan. @KRBRZ063 ve #PUBGHACK #KRBRZ #Zirve ekle."
     )
 
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
@@ -214,8 +225,8 @@ async def generate_caption_from_image(image_bytes: bytes) -> str:
             ]
         }],
         "generationConfig": {
-            "maxOutputTokens": 40,
-            "temperature": 0.8
+            "maxOutputTokens": 15,  # Çok az!
+            "temperature": 0.3
         }
     }
 
@@ -324,10 +335,12 @@ class TemplateManager:
 def init_default_templates():
     """Initialize default message templates"""
     default_templates = [
-        ("weekly_bypass", "🔥 Haftalık BYPASS! Sadece {price}₺ 👑 #KRBRZ_VIP #PUBGBypass", "promo"),
-        ("monthly_hack", "💎 Aylık HACK paketi! {features} ⚡ #KRBRZ_VIP #Hack", "promo"),
-        ("victory_post", "💀 Zafer! KRBRZ VIP ile {kills} kill 🎯 #PUBG #Win #KRBRZ_VIP", "victory"),
-        ("urgent_sale", "🚀 SON {hours} SAAT! Özel fiyat 🔥 #KRBRZ_VIP #PUBGBypass", "urgent")
+        ("bypass", "Bypass aktif 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "promo"),
+        ("hack", "Hack hazır ⚡ @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "promo"),
+        ("win", "Zafer 👑 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "victory"),
+        ("sale", "Satışta 💎 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "urgent"),
+        ("weekly", "Haftalık 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "weekly"),
+        ("daily", "Günlük ⚡ @KRBRZ063 #PUBGHACK #KRBRZ #Zirve", "daily")
     ]
     
     for name, content, category in default_templates:
@@ -421,6 +434,7 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     template_status = "✅ Aktif" if bot_config.get("template_system_enabled") else "❌ Pasif"
     stats_status = "✅ Aktif" if bot_config.get("statistics_enabled") else "❌ Pasif"
     auto_schedule_status = "✅ Aktif" if bot_config.get("auto_schedule_enabled") else "❌ Pasif"
+    simple_mode_status = "✅ Aktif" if bot_config.get("simple_template_mode", False) else "❌ Pasif"
     
     keyboard = [
         [
@@ -431,6 +445,7 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton(f"🖼️ Oto. Başlık Üretme: {image_ai_status}", callback_data='toggle_image_ai')],
         [InlineKeyboardButton(f"💧 Filigran: {wm_status}", callback_data='set_watermark')],
         [InlineKeyboardButton(f"📋 Template Sistemi: {template_status}", callback_data='toggle_template')],
+        [InlineKeyboardButton(f"🚀 Basit Mod: {simple_mode_status}", callback_data='toggle_simple_mode')],
         [InlineKeyboardButton(f"📊 İstatistikler: {stats_status}", callback_data='toggle_stats')],
         [InlineKeyboardButton(f"⏰ Otomatik Program: {auto_schedule_status}", callback_data='toggle_schedule')],
         [
@@ -479,6 +494,14 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await setup_command(query, context)
     elif data == 'toggle_image_ai':
         bot_config["ai_image_analysis_enabled"] = not bot_config.get("ai_image_analysis_enabled", False)
+        save_config()
+        return await setup_command(query, context)
+    elif data == 'toggle_simple_mode':
+        bot_config["simple_template_mode"] = not bot_config.get("simple_template_mode", False)
+        if bot_config["simple_template_mode"]:
+            # Basit mod aktifken AI'yi kapat
+            bot_config["ai_text_enhancement_enabled"] = False
+            bot_config["ai_image_analysis_enabled"] = False
         save_config()
         return await setup_command(query, context)
     elif data == 'toggle_template':
@@ -653,28 +676,53 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Determine caption
         if message.caption:
-            # Enhance existing caption if enabled
-            if bot_config.get("ai_text_enhancement_enabled"):
+            # Check if simple template mode is enabled
+            if bot_config.get("simple_template_mode", False):
+                final_caption = get_simple_template(message.caption)
+            elif bot_config.get("ai_text_enhancement_enabled"):
                 await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
-                final_caption = await enhance_text_with_gemini(message.caption)
-                ai_enhanced = True
+                try:
+                    final_caption = await enhance_text_with_gemini(message.caption)
+                    ai_enhanced = True
+                except Exception as e:
+                    logger.error(f"AI enhancement failed: {e}")
+                    # Fallback to simple template
+                    final_caption = get_simple_template(message.caption)
+                    ai_enhanced = False
             else:
-                final_caption = message.caption
+                # Use simple template instead of original
+                final_caption = get_simple_template(message.caption)
         elif message.photo and not message.caption:
             # Generate caption from image if enabled
             if bot_config.get("ai_image_analysis_enabled"):
                 await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
-                final_caption = await generate_caption_from_image(photo_bytes)
-                ai_enhanced = True
+                try:
+                    final_caption = await generate_caption_from_image(photo_bytes)
+                    ai_enhanced = True
+                except Exception as e:
+                    logger.error(f"AI image analysis failed: {e}")
+                    # Fallback to simple template
+                    final_caption = "Zafer 👑 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
+                    ai_enhanced = False
+            else:
+                # Use simple template for images
+                final_caption = "Hack aktif 🔥 @KRBRZ063 #PUBGHACK #KRBRZ #Zirve"
         elif message.text:
             # Handle text-only messages
             message_type = "text"
             if bot_config.get("ai_text_enhancement_enabled"):
                 await context.bot.send_chat_action(chat_id=message.chat_id, action="typing")
-                final_caption = await enhance_text_with_gemini(message.text)
-                ai_enhanced = True
+                try:
+                    final_caption = await enhance_text_with_gemini(message.text)
+                    ai_enhanced = True
+                except Exception as e:
+                    logger.error(f"AI enhancement failed: {e}")
+                    # Fallback to simple template
+                    final_caption = get_simple_template(message.text)
+                    ai_enhanced = False
             else:
-                final_caption = message.text
+                # Use simple template instead of original
+                final_caption = get_simple_template(message.text)
 
         # Forward to destination channels
         success_count = 0
