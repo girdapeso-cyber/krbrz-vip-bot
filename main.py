@@ -192,6 +192,19 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- SON VE KARARLI KURULUM SİHİRBAZI ---
 (MENU, PERSONA, CHANNELS, ADD_CHANNEL) = map(chr, range(4))
 
+async def update_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, text: str, reply_markup: InlineKeyboardMarkup):
+    """Menü mesajını güvenli bir şekilde günceller."""
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Menü güncellenemedi: {e}")
+
 async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_ai_status = "✅ Aktif" if bot_config["ai_text_enhancement_enabled"] else "❌ Pasif"
     image_ai_status = "✅ Aktif" if bot_config["ai_image_analysis_enabled"] else "❌ Pasif"
@@ -207,17 +220,17 @@ async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
     
-    # Eğer daha önce bir menü mesajı varsa, onu düzenleyelim. Yoksa yenisini gönderelim.
-    menu_message_id = context.user_data.get('menu_message_id')
-    if menu_message_id and update.callback_query:
-        await update.callback_query.edit_message_text(content, reply_markup=reply_markup, parse_mode='Markdown')
-    else:
-        if menu_message_id:
+    # /ayarla komutu ile gelindiyse, eski menüyü silip yenisini gönder.
+    if update.message:
+        if 'menu_message_id' in context.user_data:
             try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=menu_message_id)
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data['menu_message_id'])
             except Exception: pass
-        sent_message = await update.effective_message.reply_text(content, reply_markup=reply_markup, parse_mode='Markdown')
+        sent_message = await update.message.reply_text(content, reply_markup=reply_markup, parse_mode='Markdown')
         context.user_data['menu_message_id'] = sent_message.message_id
+        context.user_data['menu_chat_id'] = sent_message.chat_id
+    else: # Buton ile gelindiyse, mevcut menüyü düzenle.
+        await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], content, reply_markup)
 
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -259,7 +272,8 @@ async def display_channels_menu(update: Update, context: ContextTypes.DEFAULT_TY
     keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {ch}", callback_data=ch)] for ch in channels]
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data='add_new')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main')])
-    await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], text, reply_markup)
 
 async def channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     query = update.callback_query
@@ -268,7 +282,8 @@ async def channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     if data == 'add_new':
         title = "Kaynak" if context.user_data['channel_type'] == 'source' else "Hedef"
-        await query.edit_message_text(f"📡 Eklenecek yeni **{title}** kanalının adını yazın (@ile veya ID olarak).")
+        text = f"📡 Eklenecek yeni **{title}** kanalının adını yazın (@ile veya ID olarak)."
+        await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], text, None) # Butonları kaldır
         return ADD_CHANNEL
     elif data == 'back_to_main':
         await display_main_menu(update, context)
@@ -303,7 +318,8 @@ async def display_persona_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("Eğlenceli Oyuncu", callback_data='Eğlenceli Oyuncu')],
         [InlineKeyboardButton("⬅️ Geri", callback_data='back_to_main')],
     ]
-    await update.callback_query.edit_message_text("🎭 Yapay zeka için bir kişilik seçin:", reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update_menu(context, update.effective_chat.id, context.user_data['menu_message_id'], "🎭 Yapay zeka için bir kişilik seçin:", reply_markup)
 
 async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     query = update.callback_query
