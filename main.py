@@ -538,6 +538,10 @@ def main():
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
 
+# DÜZELTME: run_flask fonksiyonu main() fonksiyonunun üzerine taşındı.
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False)
+
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
     logger.info(f"🌐 Flask sunucusu {PORT} portunda başlatıldı.")
