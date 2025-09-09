@@ -22,7 +22,8 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes,
     CallbackQueryHandler
 )
-from flask import Flask
+# --- Flask için Ek Kütüphaneler ---
+from flask import Flask, render_template_string, request, redirect, url_for
 from functools import lru_cache
 
 # --- Güvenli Ortam Değişkenleri ---
@@ -68,12 +69,20 @@ def load_config():
         "ai_text_enhancement_enabled": True,
         "ai_image_analysis_enabled": True,
         "ai_persona": "Agresif Pazarlamacı",
+        "personas": {
+            "Agresif Pazarlamacı": "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun.",
+            "Profesyonel Satıcı": "Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun.",
+            "Eğlenceli Oyuncu": "Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun."
+        },
         "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
         "statistics_enabled": True,
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
+            # Eski config dosyaları için uyumluluk
+            if 'personas' not in config:
+                config['personas'] = defaults['personas']
             defaults.update(config)
     return defaults
 
@@ -86,12 +95,8 @@ def save_config():
 # --- YAPAY ZEKAYI DAHA AKILLI HALE GETİREN FONKSİYONLAR ---
 
 def get_ai_persona_prompt(persona: str) -> str:
-    personas = {
-        "Agresif Pazarlamacı": ("Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun."),
-        "Profesyonel Satıcı": ("Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun."),
-        "Eğlenceli Oyuncu": ("Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun.")
-    }
-    return personas.get(persona, personas["Agresif Pazarlamacı"])
+    # Artık prompları config dosyasından okuyor
+    return bot_config.get("personas", {}).get(persona, "Normal bir şekilde yaz.")
 
 @lru_cache(maxsize=100)
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
@@ -156,7 +161,7 @@ async def apply_watermark(photo_bytes: bytes) -> bytes:
         logger.error(f"Filigran hatası: {e}")
         return photo_bytes
 
-# --- Admin ve Ayar Komutları ---
+# --- Admin ve Ayar Komutları (Telegram) ---
 def admin_only(func):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
@@ -376,15 +381,144 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Genel yönlendirici hatası: {e}")
 
-# --- Flask Web Sunucusu ---
+# --- Flask Web Sunucusu + AI KONTROL MERKEZİ ---
 flask_app = Flask(__name__)
+
+# --- HTML Şablonları ---
+HTML_LAYOUT = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KRBRZ VIP - AI Kontrol Merkezi</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background-color: #1e1e1e; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h1, h2 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }
+        nav { margin-bottom: 20px; }
+        nav a { color: #03dac6; text-decoration: none; padding: 10px 15px; margin-right: 10px; border-radius: 5px; background-color: #333; transition: background-color 0.3s; }
+        nav a:hover { background-color: #444; }
+        .card { background-color: #2c2c2c; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #a0a0a0; }
+        textarea, input[type="text"] { width: 95%; background-color: #333; border: 1px solid #555; color: #e0e0e0; padding: 10px; border-radius: 5px; font-size: 1em; }
+        button { background-color: #bb86fc; color: #121212; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold; transition: background-color 0.3s; }
+        button:hover { background-color: #a362f7; }
+        .persona-cards { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        .persona-card { flex: 1; min-width: 200px; border: 2px solid #333; padding: 15px; border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .persona-card.active { border-color: #03dac6; background-color: #03dac620; }
+        .persona-card h3 { margin-top: 0; color: #03dac6; }
+        .result { background-color: #333; padding: 15px; border-radius: 5px; margin-top: 15px; white-space: pre-wrap; font-family: Consolas, monaco, monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
+"""
+
+HTML_DASHBOARD = """
+{% extends "layout" %}
+{% block content %}
+    <h1>🚀 KRBRZ VIP - AI Kontrol Merkezi</h1>
+    <nav>
+        <a href="/">Gösterge Paneli</a>
+        <a href="/ai-test">AI Metin Test</a>
+    </nav>
+    
+    <h2>🎭 AI Persona Yönetimi</h2>
+    <div class="card">
+        <p>Botun kullanacağı yapay zeka kişiliğini seçin. Tüm metinler bu karaktere göre üretilecektir.</p>
+        <div class="persona-cards">
+            {% for name in personas %}
+            <div class="persona-card {% if name == active_persona %}active{% endif %}" onclick="window.location.href='/set-persona/{{ name }}'">
+                <h3>{{ name }}</h3>
+                <small>{{ personas[name][:80] }}...</small>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <h2>📊 Bot Durumu</h2>
+    <div class="card">
+        <p><strong>Genel Durum:</strong> {{ '▶️ Çalışıyor' if not is_paused else '⏸️ Duraklatıldı' }}</p>
+        <p><strong>Kaynak Kanallar:</strong> {{ source_channels|length }} adet</p>
+        <p><strong>Hedef Kanallar:</strong> {{ destination_channels|length }} adet</p>
+    </div>
+{% endblock %}
+"""
+
+HTML_AI_TEST = """
+{% extends "layout" %}
+{% block content %}
+    <h1>🔬 AI Metin Test Paneli</h1>
+    <nav>
+        <a href="/">Gösterge Paneli</a>
+        <a href="/ai-test">AI Metin Test</a>
+    </nav>
+    
+    <div class="card">
+        <form method="POST">
+            <div class="form-group">
+                <label for="content">Test edilecek orijinal metin:</label>
+                <textarea name="content" id="content" rows="4">{{ input_text or '' }}</textarea>
+            </div>
+            <button type="submit">AI ile Geliştir (Persona: {{ active_persona }})</button>
+        </form>
+        
+        {% if output_text %}
+        <div class="result">
+            <strong>✨ AI Sonucu:</strong><br>{{ output_text }}
+        </div>
+        {% endif %}
+    </div>
+{% endblock %}
+"""
 
 @flask_app.route('/')
 def home():
-    return f"<h1>KRBRZ VIP Bot Aktif</h1><p>AI Durumu: {'✅' if bot_config['ai_text_enhancement_enabled'] else '❌'}</p><p>Bot Durumu: {'▶️ Çalışıyor' if not bot_config['is_paused'] else '⏸️ Duraklatıldı'}</p>"
+    # render_template_string için context'i oluştur
+    context = {
+        "is_paused": bot_config.get('is_paused', False),
+        "source_channels": bot_config.get('source_channels', []),
+        "destination_channels": bot_config.get('destination_channels', []),
+        "active_persona": bot_config.get('ai_persona'),
+        "personas": bot_config.get('personas', {})
+    }
+    # Şablonları birleştir
+    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_DASHBOARD)
+    return render_template_string(full_html, **context)
 
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False)
+@flask_app.route('/set-persona/<string:name>')
+def set_persona(name):
+    if name in bot_config.get('personas', {}):
+        bot_config['ai_persona'] = name
+        save_config()
+    return redirect(url_for('home'))
+
+@flask_app.route('/ai-test', methods=['GET', 'POST'])
+def ai_test():
+    input_text = ""
+    output_text = ""
+    if request.method == 'POST':
+        input_text = request.form.get('content')
+        if input_text:
+            # Asenkron fonksiyonu senkron bir route'da çalıştırmak için
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            output_text = loop.run_until_complete(enhance_text_with_gemini_smarter(input_text))
+            loop.close()
+
+    context = {
+        "active_persona": bot_config.get('ai_persona'),
+        "input_text": input_text,
+        "output_text": output_text
+    }
+    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_AI_TEST)
+    return render_template_string(full_html, **context)
+
 
 # --- Botun Başlatılması ---
 def main():
@@ -399,7 +533,6 @@ def main():
     application.add_handler(CallbackQueryHandler(menu_callback_handler))
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, reply_handler))
     
-    # İYİLEŞTİRME: Sadece kanal postlarını değil, tüm içerik türlerini dinle
     application.add_handler(MessageHandler(filters.ALL & filters.ChatType.CHANNEL, forwarder))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
