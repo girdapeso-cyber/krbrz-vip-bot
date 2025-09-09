@@ -68,14 +68,14 @@ def load_config():
         "is_paused": False,
         "ai_text_enhancement_enabled": True,
         "ai_image_analysis_enabled": True,
-        "ai_persona": "Agresif Pazarlamacı", # YENİ: AI Kişiliği
+        "ai_persona": "Agresif Pazarlamacı",
         "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
         "statistics_enabled": True
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config = json.load(f)
-            defaults.update(config) # Mevcut ayarları koru, eksikleri ekle
+            defaults.update(config)
     return defaults
 
 bot_config = load_config()
@@ -84,148 +84,69 @@ def save_config():
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(bot_config, f, indent=4, ensure_ascii=False)
 
-# --- YAPAY ZEKAYI DAHA AKILLI HALE GETİREN YENİ FONKSİYONLAR ---
+# --- YAPAY ZEKAYI DAHA AKILLI HALE GETİREN FONKSİYONLAR ---
 
 def get_ai_persona_prompt(persona: str) -> str:
-    """Seçilen kişiliğe göre AI için sistem talimatı döndürür."""
     personas = {
-        "Agresif Pazarlamacı": (
-            "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. "
-            "Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. "
-            "Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. "
-            "Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun."
-        ),
-        "Profesyonel Satıcı": (
-            "Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. "
-            "Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. "
-            "Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. "
-            "Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun."
-        ),
-        "Eğlenceli Oyuncu": (
-            "Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. "
-            "Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. "
-            "Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. "
-            "Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun."
-        )
+        "Agresif Pazarlamacı": ("Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun."),
+        "Profesyonel Satıcı": ("Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun."),
+        "Eğlenceli Oyuncu": ("Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun.")
     }
     return personas.get(persona, personas["Agresif Pazarlamacı"])
 
-
 @lru_cache(maxsize=100)
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
-    """
-    YENİLENDİ: Metni sadece güzelleştirmez, içeriği ANALİZ EDER ve seçilen kişiliğe göre
-    dinamik ve yaratıcı bir pazarlama metni oluşturur.
-    """
-    if not GEMINI_API_KEY or not original_text:
-        return original_text + " @KRBRZ063 #KRBRZ"
-
+    if not GEMINI_API_KEY or not original_text: return original_text + " @KRBRZ063 #KRBRZ"
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     user_prompt = f"Aşağıdaki metnin içeriğini analiz et: '{original_text}'. Bu içeriğe dayanarak, seçtiğim kişiliğe uygun, kısa, yaratıcı ve dikkat çekici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir açıklama yapma."
-
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": user_prompt}]}],
-        "systemInstruction": {"parts": [{"text": persona_prompt}]},
-        "generationConfig": {
-            "maxOutputTokens": 80,
-            "temperature": 0.8,
-            "topP": 0.9,
-            "topK": 40
-        }
-    }
-
+    payload = {"contents": [{"parts": [{"text": user_prompt}]}],"systemInstruction": {"parts": [{"text": persona_prompt}]},"generationConfig": {"maxOutputTokens": 80,"temperature": 0.8,"topP": 0.9,"topK": 40}}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            enhanced_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return enhanced_text
+            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e:
         logger.error(f"Akıllı Metin API hatası: {e}")
         return original_text + " @KRBRZ063 #KRBRZ"
 
-
 async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
-    """
-    YENİLENDİ: Görüntüyü KÖRÜ KÖRÜNE değil, içeriğini ANALİZ EDEREK yorumlar.
-    Zafer anını, çatışmayı veya önemli bir olayı tespit edip ona göre başlık üretir.
-    """
-    if not GEMINI_API_KEY:
-        return "@KRBRZ063 #KRBRZ"
-
+    if not GEMINI_API_KEY: return "@KRBRZ063 #KRBRZ"
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-
-    user_prompt = (
-        "Bu bir PUBG Mobile oyununa ait ekran görüntüsü. Görüntüyü dikkatlice analiz et. "
-        "Görüntüde ne oluyor? (Örn: Bir zafer anı mı? 'Winner Winner Chicken Dinner' yazısı var mı? Yoğun bir çatışma mı var? Bir oyuncu dürbünle rakip mi arıyor?) "
-        "Bu analizine dayanarak, seçtiğim kişiliğe uygun, kısa ve etkileyici bir sosyal medya başlığı oluştur. "
-        "Sadece oluşturduğun başlığı yaz, başka bir şey ekleme."
-    )
-
+    user_prompt = ("Bu bir PUBG Mobile oyununa ait ekran görüntüsü. Görüntüyü dikkatlice analiz et. Görüntüde ne oluyor? (Örn: Bir zafer anı mı? 'Winner Winner Chicken Dinner' yazısı var mı? Yoğun bir çatışma mı var?) Bu analizine dayanarak, seçtiğim kişiliğe uygun, kısa ve etkileyici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir şey ekleme.")
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": user_prompt},
-                {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
-            ]
-        }],
-        "systemInstruction": {"parts": [{"text": persona_prompt}]},
-        "generationConfig": {
-            "maxOutputTokens": 80,
-            "temperature": 0.8
-        }
-    }
-
+    payload = {"contents": [{"parts": [{"text": user_prompt},{"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}]}],"systemInstruction": {"parts": [{"text": persona_prompt}]},"generationConfig": {"maxOutputTokens": 80,"temperature": 0.8}}
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            caption = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return caption
+            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e:
         logger.error(f"Akıllı Görüntü API hatası: {e}")
         return "Zirve bizimdir! 👑 @KRBRZ063 #PUBGHACK #KRBRZ"
 
-
 # --- Filigran Fonksiyonu ---
 async def apply_watermark(photo_bytes: bytes) -> bytes:
     wm_config = bot_config.get("watermark", {})
-    if not wm_config.get("enabled"):
-        return photo_bytes
+    if not wm_config.get("enabled"): return photo_bytes
     try:
         with Image.open(io.BytesIO(photo_bytes)).convert("RGBA") as base:
             txt = Image.new("RGBA", base.size, (255, 255, 255, 0))
             font_size = max(15, base.size[1] // 25)
-            try:
-                font = ImageFont.truetype("arial.ttf", size=font_size)
-            except IOError:
-                font = ImageFont.load_default()
-            
+            try: font = ImageFont.truetype("arial.ttf", size=font_size)
+            except IOError: font = ImageFont.load_default()
             d = ImageDraw.Draw(txt)
-            
-            colors = {
-                "beyaz": (255, 255, 255, 180),
-                "siyah": (0, 0, 0, 180),
-                "kirmizi": (255, 0, 0, 180)
-            }
+            colors = {"beyaz": (255, 255, 255, 180),"siyah": (0, 0, 0, 180),"kirmizi": (255, 0, 0, 180)}
             fill_color = colors.get(wm_config.get("color", "beyaz").lower(), (255, 255, 255, 180))
             text = wm_config.get("text", "KRBRZ_VIP")
-            
             text_bbox = d.textbbox((0, 0), text, font=font)
             text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
             margin = 15
-            
-            positions = {
-                'sag-alt': (base.width - text_width - margin, base.height - text_height - margin),
-                'sol-ust': (margin, margin)
-            }
+            positions = {'sag-alt': (base.width - text_width - margin, base.height - text_height - margin),'sol-ust': (margin, margin)}
             x, y = positions.get(wm_config.get("position", "sag-alt"), positions['sag-alt'])
-            
             d.text((x, y), text, font=font, fill=fill_color)
             out = Image.alpha_composite(base, txt)
             buffer = io.BytesIO()
@@ -245,10 +166,36 @@ def admin_only(func):
         return await func(update, context, *args, **kwargs)
     return wrapped
 
-# --- YENİ PROFESYONEL KURULUM SİHİRBAZI ---
-(SETUP_MENU, GET_PERSONA, 
- MANAGE_SOURCE, MANAGE_DEST, 
- ADD_SOURCE, ADD_DEST) = range(6)
+# YENİ EKLENEN KOMUTLAR
+@admin_only
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bota başlangıç mesajı ve komut listesi ekler."""
+    await update.message.reply_text(
+        "🚀 **KRBRZ VIP Bot Aktif!**\n\n"
+        "İşte kullanabileceğiniz komutlar:\n"
+        "🔹 `/ayarla` - Botun yönetim panelini açar.\n"
+        "🔹 `/durum` - Botun çalışıp çalışmadığını kontrol eder.\n"
+        "🔹 `/durdur` - Botun mesaj iletmesini duraklatır/başlatır.\n"
+        "🔹 `/iptal` - Ayar menüsündeki bir işlemi iptal eder."
+        , parse_mode='Markdown'
+    )
+
+@admin_only
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Botun anlık durumunu kontrol etmek için basit bir komut."""
+    status = "▶️ Çalışıyor ve Mesajları İletiyor" if not bot_config.get('is_paused') else "⏸️ Duraklatıldı"
+    await update.message.reply_text(f"✅ Bot Aktif!\n\n**Durum:** {status}", parse_mode='Markdown')
+
+@admin_only
+async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Botun mesaj iletimini duraklatır veya devam ettirir."""
+    bot_config["is_paused"] = not bot_config.get("is_paused", False)
+    save_config()
+    status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
+    await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
+
+# --- DAHA STABİL HALE GETİRİLEN KURULUM SİHİRBAZI ---
+(SETUP_MENU, GET_PERSONA, MANAGE_SOURCE, MANAGE_DEST, ADD_SOURCE, ADD_DEST) = range(6)
 
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -266,7 +213,6 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton("✅ Çıkış", callback_data='exit_setup')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     message_content = "🚀 **KRBRZ VIP Bot Yönetim Paneli**\n\nYapay zeka ayarlarını ve kanal yapılandırmasını buradan yönetin."
     
     if update.message:
@@ -313,10 +259,7 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    
-    if query.data == 'back_to_main_menu':
-        return await setup_command(update, context)
-
+    if query.data == 'back_to_main_menu': return await setup_command(update, context)
     persona = query.data.split('_')[1]
     bot_config["ai_persona"] = persona
     save_config()
@@ -324,37 +267,27 @@ async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return await setup_command(update, context)
 
 async def manage_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
-    """Kanal yönetimi için dinamik bir menü gösterir."""
     query = update.callback_query
-    
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
-    
     text = f"⚙️ **{title} Kanalları Yönetimi**\n\nMevcut kanallar:"
-    if not channels:
-        text += "\n\n_Henüz kanal eklenmemiş._"
-    
+    if not channels: text += "\n\n_Henüz kanal eklenmemiş._"
     keyboard = []
     for channel in channels:
         keyboard.append([InlineKeyboardButton(f"🗑️ Sil: {channel}", callback_data=f'remove_{channel_type}_{channel}')])
-        
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main_menu')])
-    
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     if query:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    else: # Yeni kanal eklendikten sonra yeni mesaj olarak gönderilir
+    else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Kaynak kanalları yönetimi menüsündeki butonları yönetir."""
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data == 'add_source':
         await query.edit_message_text("📡 Eklenecek yeni **Kaynak** kanalının adını yazın (@ile veya ID olarak).")
         return ADD_SOURCE
@@ -370,11 +303,9 @@ async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SETUP_MENU
 
 async def dest_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Hedef kanalları yönetimi menüsündeki butonları yönetir."""
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data == 'add_dest':
         await query.edit_message_text("📤 Eklenecek yeni **Hedef** kanalının adını yazın (@ile veya ID olarak).")
         return ADD_DEST
@@ -390,17 +321,14 @@ async def dest_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return SETUP_MENU
 
 async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str) -> int:
-    """Kullanıcıdan gelen metni yeni bir kanal olarak ekler."""
     channel = update.message.text.strip()
     config_key = f"{channel_type}_channels"
-    
     if channel not in bot_config[config_key]:
         bot_config[config_key].append(channel)
         save_config()
         await update.message.reply_text(f"✅ Kanal eklendi: {channel}")
     else:
         await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}")
-
     await manage_channels_menu(update, context, channel_type)
     return MANAGE_SOURCE if channel_type == 'source' else MANAGE_DEST
 
@@ -411,8 +339,12 @@ async def add_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return await add_channel_handler(update, context, 'dest')
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("❌ İşlem iptal edildi.")
+    await update.message.reply_text("✅ Ayar menüsü kapatıldı.")
     return ConversationHandler.END
+
+async def conversation_timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sohbet zaman aşımına uğradığında kullanıcıyı bilgilendirir."""
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="⏰ Uzun süre işlem yapılmadığı için ayar menüsü otomatik olarak kapatıldı. Tekrar açmak için /ayarla yazabilirsiniz.")
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -431,8 +363,6 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file = await context.bot.get_file(message.photo[-1].file_id)
             photo_bytes = await file.download_as_bytearray()
             photo_bytes = bytes(photo_bytes)
-
-        await context.bot.send_chat_action(chat_id=ADMIN_USER_ID, action="typing")
 
         if message.caption and bot_config["ai_text_enhancement_enabled"]:
             final_caption = await enhance_text_with_gemini_smarter(message.caption)
@@ -483,12 +413,22 @@ def main():
             ADD_SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_source_handler)],
             ADD_DEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dest_handler)],
         },
-        fallbacks=[CommandHandler("iptal", cancel_setup)],
-        per_message=False
+        fallbacks=[
+            CommandHandler("iptal", cancel_setup),
+            CallbackQueryHandler(setup_command, pattern='^back_to_main_menu$')
+        ],
+        conversation_timeout=300.0, # YENİ: 5 dakika sonra menüyü otomatik kapatır
+        allow_reentry=True # YENİ: Menü içindeyken /ayarla komutunun tekrar çalışmasını sağlar
     )
     
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("durum", status_command))
+    application.add_handler(CommandHandler("durdur", pause_command))
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
+    
+    # Zaman aşımı için özel bir handler ekliyoruz
+    application.add_handler(MessageHandler(filters.StatusUpdate.TIMEOUT, conversation_timeout_handler))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
