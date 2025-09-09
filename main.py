@@ -12,9 +12,9 @@ import io
 import base64
 import sqlite3
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Thread
-from typing import Optional, List, Dict
+from typing import List, Dict
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -22,9 +22,8 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes,
     ConversationHandler, CallbackQueryHandler
 )
-from flask import Flask, render_template_string, jsonify
+from flask import Flask
 from functools import lru_cache
-import time
 
 # --- Güvenli Ortam Değişkenleri ---
 try:
@@ -166,10 +165,8 @@ def admin_only(func):
         return await func(update, context, *args, **kwargs)
     return wrapped
 
-# YENİ EKLENEN KOMUTLAR
 @admin_only
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bota başlangıç mesajı ve komut listesi ekler."""
     await update.message.reply_text(
         "🚀 **KRBRZ VIP Bot Aktif!**\n\n"
         "İşte kullanabileceğiniz komutlar:\n"
@@ -182,13 +179,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Botun anlık durumunu kontrol etmek için basit bir komut."""
     status = "▶️ Çalışıyor ve Mesajları İletiyor" if not bot_config.get('is_paused') else "⏸️ Duraklatıldı"
     await update.message.reply_text(f"✅ Bot Aktif!\n\n**Durum:** {status}", parse_mode='Markdown')
 
 @admin_only
 async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Botun mesaj iletimini duraklatır veya devam ettirir."""
     bot_config["is_paused"] = not bot_config.get("is_paused", False)
     save_config()
     status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
@@ -228,10 +223,10 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     
     if data == 'manage_source':
-        await manage_channels_menu(update, context, 'source')
+        await manage_channels_menu(update.callback_query, context, 'source')
         return MANAGE_SOURCE
     elif data == 'manage_dest':
-        await manage_channels_menu(update, context, 'dest')
+        await manage_channels_menu(update.callback_query, context, 'dest')
         return MANAGE_DEST
     elif data == 'toggle_text_ai':
         bot_config["ai_text_enhancement_enabled"] = not bot_config["ai_text_enhancement_enabled"]
@@ -254,7 +249,7 @@ async def setup_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     
     save_config()
-    return await setup_command(query, context)
+    return await setup_command(update, context)
 
 async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -266,8 +261,7 @@ async def persona_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.message.reply_text(f"✅ AI kişiliği '{persona}' olarak ayarlandı.")
     return await setup_command(update, context)
 
-async def manage_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
-    query = update.callback_query
+async def manage_channels_menu(query_or_update, context: ContextTypes.DEFAULT_TYPE, channel_type: str):
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
@@ -279,10 +273,11 @@ async def manage_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='back_to_main_menu')])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    if query:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    if isinstance(query_or_update, Update): # Mesajdan geliyorsa
+        await query_or_update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else: # Butondan geliyorsa
+        await query_or_update.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -296,7 +291,7 @@ async def source_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if channel_name in bot_config['source_channels']:
             bot_config['source_channels'].remove(channel_name)
             save_config()
-        await manage_channels_menu(update, context, 'source')
+        await manage_channels_menu(query, context, 'source')
         return MANAGE_SOURCE
     elif data == 'back_to_main_menu':
         await setup_command(update, context)
@@ -314,7 +309,7 @@ async def dest_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if channel_name in bot_config['destination_channels']:
             bot_config['destination_channels'].remove(channel_name)
             save_config()
-        await manage_channels_menu(update, context, 'dest')
+        await manage_channels_menu(query, context, 'dest')
         return MANAGE_DEST
     elif data == 'back_to_main_menu':
         await setup_command(update, context)
@@ -326,9 +321,11 @@ async def add_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if channel not in bot_config[config_key]:
         bot_config[config_key].append(channel)
         save_config()
-        await update.message.reply_text(f"✅ Kanal eklendi: {channel}")
+        await update.message.reply_text(f"✅ Kanal eklendi: {channel}", parse_mode='Markdown')
     else:
-        await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}")
+        await update.message.reply_text(f"⚠️ Bu kanal zaten listede: {channel}", parse_mode='Markdown')
+    
+    # DÜZELTME: Kanal eklendikten sonra menüyü tekrar göster
     await manage_channels_menu(update, context, channel_type)
     return MANAGE_SOURCE if channel_type == 'source' else MANAGE_DEST
 
@@ -343,9 +340,6 @@ async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def conversation_timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sohbet zaman aşımına uğradığında admini bilgilendirir."""
-    # Timeout update'lerinde 'effective_chat' bulunmaz.
-    # Bu bot sadece admin tarafından kullanıldığı için, mesajı doğrudan admine gönderiyoruz.
     logger.info("Konuşma zaman aşımına uğradı. Admine bilgi veriliyor.")
     await context.bot.send_message(chat_id=ADMIN_USER_ID, text="⏰ Uzun süre işlem yapılmadığı için ayar menüsü otomatik olarak kapatıldı. Tekrar açmak için /ayarla yazabilirsiniz.")
 
@@ -420,8 +414,8 @@ def main():
             CommandHandler("iptal", cancel_setup),
             CallbackQueryHandler(setup_command, pattern='^back_to_main_menu$')
         ],
-        conversation_timeout=300.0, # YENİ: 5 dakika sonra menüyü otomatik kapatır
-        allow_reentry=True # YENİ: Menü içindeyken /ayarla komutunun tekrar çalışmasını sağlar
+        conversation_timeout=300.0,
+        allow_reentry=True
     )
     
     application.add_handler(CommandHandler("start", start_command))
@@ -429,12 +423,6 @@ def main():
     application.add_handler(CommandHandler("durdur", pause_command))
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, forwarder))
-    
-    # Zaman aşımı için özel bir handler ekliyoruz
-    # HATA BURADAYDI, ŞİMDİ DÜZELTİLDİ
-    # Kütüphanenin yeni sürümleri timeout'ları exception olarak ele alıyor,
-    # bu yüzden ayrı bir handler'a gerek kalmıyor ve çökme yaratıyor.
-    # application.add_handler(MessageHandler(filters.StatusUpdate.TIMEOUT, conversation_timeout_handler))
     
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
