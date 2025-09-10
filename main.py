@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 KRBRZ VIP Bot - Gelişmiş AI ile Telegram Botu
-Bu versiyon, ayar menüsünün kilitlenmesini engellemek için profesyonel ve durumsuz bir yapı kullanır.
+Bu versiyon, tüm kontrolü Telegram'a taşıyarak web panelini ortadan kaldırır.
 """
 
 # --- Gerekli Kütüphaneler ---
@@ -13,7 +13,7 @@ import base64
 import sqlite3
 import asyncio
 from datetime import datetime
-from threading import Thread, Lock
+from threading import Lock
 from typing import List, Dict
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -22,8 +22,6 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes,
     CallbackQueryHandler
 )
-# --- Flask için Ek Kütüphaneler ---
-from flask import Flask, render_template_string, request, redirect, url_for, flash
 from functools import lru_cache
 
 # --- Güvenli Ortam Değişkenleri ---
@@ -31,9 +29,6 @@ try:
     BOT_TOKEN = os.environ['BOT_TOKEN']
     ADMIN_USER_ID = int(os.environ['ADMIN_USER_ID'])
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-    PORT = int(os.environ.get('PORT', 5000))
-    # DÜZELTME: Flask için sabit bir secret key
-    FLASK_SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'varsayilan_cok_guvenli_bir_anahtar_:)')
 except (KeyError, ValueError) as e:
     print(f"!!! HATA: Gerekli environment variable bulunamadı: {e}")
     exit()
@@ -58,20 +53,16 @@ def init_database():
     conn.commit()
     conn.close()
 
-init_database()
-
 # --- Konfigürasyon Yönetimi ---
 CONFIG_FILE = "bot_config.json"
-config_lock = Lock() # DÜZELTME: Race condition'ı engellemek için kilit
+config_lock = Lock()
 
 def load_config():
     with config_lock:
         defaults = {
-            "source_channels": [],
-            "destination_channels": [],
-            "is_paused": False,
-            "ai_text_enhancement_enabled": True,
-            "ai_image_analysis_enabled": True,
+            "source_channels": [], "destination_channels": [], "is_paused": False,
+            "ai_text_enhancement_enabled": True, "ai_image_analysis_enabled": True,
+            "ai_model": "gemini-1.5-pro-latest", # YENİ: AI Model Seçimi
             "ai_persona": "Agresif Pazarlamacı",
             "personas": {
                 "Agresif Pazarlamacı": "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun.",
@@ -79,17 +70,14 @@ def load_config():
                 "Eğlenceli Oyuncu": "Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun."
             },
             "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
-            "statistics_enabled": True,
-            "admin_ids": [], # Çoklu admin sistemi için
+            "admin_ids": [],
         }
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 defaults.update(config)
-        
         if ADMIN_USER_ID not in defaults['admin_ids']:
             defaults['admin_ids'].append(ADMIN_USER_ID)
-            
         return defaults
 
 bot_config = load_config()
@@ -99,39 +87,39 @@ def save_config():
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(bot_config, f, indent=4, ensure_ascii=False)
 
-# --- YAPAY ZEKAYI DAHA AKILLI HALE GETİREN FONKSİYONLAR ---
+# --- YAPAY ZEKA FONKSİYONLARI ---
 def get_ai_persona_prompt(persona: str) -> str:
     return bot_config.get("personas", {}).get(persona, "Normal bir şekilde yaz.")
 @lru_cache(maxsize=100)
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
     if not GEMINI_API_KEY or not original_text: return original_text + " @KRBRZ063 #KRBRZ"
+    model_name = bot_config.get("ai_model", "gemini-1.5-pro-latest")
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     user_prompt = f"Aşağıdaki metnin içeriğini analiz et: '{original_text}'. Bu içeriğe dayanarak, seçtiğim kişiliğe uygun, kısa, yaratıcı ve dikkat çekici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir açıklama yapma."
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": user_prompt}]}],"systemInstruction": {"parts": [{"text": persona_prompt}]},"generationConfig": {"maxOutputTokens": 80,"temperature": 0.8,"topP": 0.9,"topK": 40}}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            # DÜZELTME: Güvenli veri erişimi
             return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or original_text
     except Exception as e:
         logger.error(f"Akıllı Metin API hatası: {e}")
         return original_text + " @KRBRZ063 #KRBRZ"
 async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
     if not GEMINI_API_KEY: return "@KRBRZ063 #KRBRZ"
+    model_name = bot_config.get("ai_model", "gemini-1.5-pro-latest")
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
     user_prompt = ("Bu bir PUBG Mobile oyununa ait ekran görüntüsü. Görüntüyü dikkatlice analiz et. Görüntüde ne oluyor? (Örn: Bir zafer anı mı? 'Winner Winner Chicken Dinner' yazısı var mı? Yoğun bir çatışma mı var?) Bu analizine dayanarak, seçtiğim kişiliğe uygun, kısa ve etkileyici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir şey ekleme.")
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": user_prompt},{"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}]}],"systemInstruction": {"parts": [{"text": persona_prompt}]},"generationConfig": {"maxOutputTokens": 80,"temperature": 0.8}}
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            # DÜZELTME: Güvenli veri erişimi
             return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or "Zirve bizimdir! 👑"
     except Exception as e:
         logger.error(f"Akıllı Görüntü API hatası: {e}")
@@ -191,15 +179,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚀 **KRBRZ VIP Bot Aktif!**\n\n"
         "İşte kullanabileceğiniz komutlar:\n"
-        "🔹 `/ayarla` - Botun yönetim panelini açar.\n"
-        "🔹 `/durum` - Botun çalışıp çalışmadığını kontrol eder.\n"
-        "🔹 `/durdur` - Botun mesaj iletmesini duraklatır/başlatır."
+        "🔹 `/ayarla` - Yönetim panelini açar.\n"
+        "🔹 `/durum` - Botun anlık durumunu gösterir.\n"
+        "🔹 `/durdur` - Mesaj iletimini duraklatır/başlatır.\n"
+        "🔹 `/kanallar` - Kaynak ve hedef kanalları listeler.\n"
+        "🔹 `/istatistik` - Günlük mesaj istatistiklerini gösterir.\n"
+        "🔹 `/loglar` - Son 20 log kaydını gönderir.\n"
+        "🔹 `/testai <metin>` - Yazdığınız metni AI ile test eder."
         , parse_mode='Markdown'
     )
+
 @admin_only
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = "▶️ Çalışıyor ve Mesajları İletiyor" if not bot_config.get('is_paused') else "⏸️ Duraklatıldı"
     await update.message.reply_text(f"✅ Bot Aktif!\n\n**Durum:** {status}", parse_mode='Markdown')
+
 @admin_only
 async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_config["is_paused"] = not bot_config.get("is_paused", False)
@@ -207,20 +201,21 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
     await update.message.reply_text(f"**Bot mesaj iletimi {status_text}**", parse_mode='Markdown')
 
-# --- YENİ PROFESYONEL AYAR MENÜSÜ SİSTEMİ (ForceReply ile) ---
+# --- YENİ TELEGRAM KONTROL MERKEZİ ---
 async def get_main_menu_content():
     text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
     image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
-    text = "🚀 **KRBRZ VIP - Gelişmiş Kontrol Merkezi**"
+    text = "🚀 **KRBRZ VIP - Kontrol Merkezi**"
     keyboard = [
         [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='menu_channels_source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='menu_channels_destination')],
+        [InlineKeyboardButton("👥 Admin Yönetimi", callback_data='menu_admins')],
         [InlineKeyboardButton(f"{text_ai_status} Akıllı Metin", callback_data='toggle_text_ai'), InlineKeyboardButton(f"{image_ai_status} Akıllı Görüntü", callback_data='toggle_image_ai')],
-        [InlineKeyboardButton(f"🎭 AI Kişiliği: {bot_config['ai_persona']}", callback_data='menu_persona')],
-        [InlineKeyboardButton(f"{wm_status} Filigran", callback_data='toggle_watermark')],
+        [InlineKeyboardButton("🧠 AI Ayarları", callback_data='menu_ai_settings')], # YENİ: AI Ayarları Menüsü
         [InlineKeyboardButton("✅ Menüyü Kapat", callback_data='menu_close')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
+
 async def get_channels_menu_content(channel_type: str):
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
@@ -230,15 +225,42 @@ async def get_channels_menu_content(channel_type: str):
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
-async def get_persona_menu_content():
-    text = "🎭 Yapay zeka için bir kişilik seçin:"
+
+async def get_admins_menu_content():
+    admins = bot_config.get('admin_ids', [])
+    text = "👥 **Admin Yönetimi**\n\nMevcut adminler:\n" + ("\n".join(f"`{admin_id}`" for admin_id in admins) or "_Boş_")
+    keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {admin_id}", callback_data=f'remove_admin_{admin_id}')] for admin_id in admins if admin_id != ADMIN_USER_ID]
+    keyboard.append([InlineKeyboardButton("➕ Yeni Admin Ekle", callback_data=f'add_admin')])
+    keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
+    return text, InlineKeyboardMarkup(keyboard)
+
+async def get_ai_settings_menu_content():
+    text = f"🧠 **AI Ayarları**\n\n- Aktif Model: `{bot_config['ai_model']}`\n- Aktif Persona: `{bot_config['ai_persona']}`"
     keyboard = [
-        [InlineKeyboardButton("Agresif Pazarlamacı", callback_data='set_persona_Agresif Pazarlamacı')],
-        [InlineKeyboardButton("Profesyonel Satıcı", callback_data='set_persona_Profesyonel Satıcı')],
-        [InlineKeyboardButton("Eğlenceli Oyuncu", callback_data='set_persona_Eğlenceli Oyuncu')],
+        [InlineKeyboardButton("🤖 Modeli Değiştir", callback_data='menu_ai_model')],
+        [InlineKeyboardButton("🎭 Personayı Değiştir", callback_data='menu_persona')],
         [InlineKeyboardButton("⬅️ Geri", callback_data='menu_main')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
+
+async def get_persona_menu_content():
+    text = "🎭 Yapay zeka için bir kişilik seçin:"
+    keyboard = [
+        [InlineKeyboardButton(f"{'➡️ ' if bot_config['ai_persona'] == p else ''}{p}", callback_data=f'set_persona_{p}')] for p in bot_config['personas']
+    ]
+    keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
+    return text, InlineKeyboardMarkup(keyboard)
+
+async def get_model_menu_content():
+    text = "🤖 Kullanılacak AI modelini seçin:"
+    models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]
+    keyboard = [
+        [InlineKeyboardButton(f"{'➡️ ' if bot_config['ai_model'] == m else ''}{m}", callback_data=f'set_model_{m}')] for m in models
+    ]
+    keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
+    return text, InlineKeyboardMarkup(keyboard)
+
+
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'menu_message_id' in context.user_data:
@@ -248,61 +270,96 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, reply_markup = await get_main_menu_content()
     sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     context.user_data['menu_message_id'] = sent_message.message_id
+
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
-    if data == 'menu_main':
-        text, reply_markup = await get_main_menu_content()
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    elif data.startswith('menu_channels_'):
-        channel_type = data.split('_')[-1]
-        text, reply_markup = await get_channels_menu_content(channel_type)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    elif data == 'menu_persona':
-        text, reply_markup = await get_persona_menu_content()
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    elif data.startswith('toggle_'):
+    
+    context.user_data['last_interaction'] = datetime.now()
+    
+    text, reply_markup = None, None
+
+    toggle_map = {"toggle_text_ai": "Akıllı Metin", "toggle_image_ai": "Akıllı Görüntü", "toggle_watermark": "Filigran"}
+    if data in toggle_map:
         key_part = data.replace('toggle_', '')
-        if key_part == "watermark":
-            bot_config['watermark']['enabled'] = not bot_config['watermark']['enabled']
-        else:
-            bot_config[f"{key_part}_enabled"] = not bot_config[f"{key_part}_enabled"]
+        config_key = 'enabled' if key_part == 'watermark' else f'{key_part}_enabled'
+        target_dict = bot_config['watermark'] if key_part == 'watermark' else bot_config
+
+        target_dict[config_key] = not target_dict[config_key]
+        status = "açıldı" if target_dict[config_key] else "kapatıldı"
+        await query.answer(f"✅ {toggle_map[data]} {status}")
         save_config()
         text, reply_markup = await get_main_menu_content()
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    elif data == 'menu_main':
+        await query.answer()
+        text, reply_markup = await get_main_menu_content()
+    elif data.startswith('menu_channels_'):
+        await query.answer()
+        channel_type = data.split('_')[-1]
+        text, reply_markup = await get_channels_menu_content(channel_type)
+    elif data == 'menu_admins':
+        await query.answer()
+        text, reply_markup = await get_admins_menu_content()
+    elif data == 'menu_ai_settings':
+        await query.answer()
+        text, reply_markup = await get_ai_settings_menu_content()
+    elif data == 'menu_persona':
+        await query.answer()
+        text, reply_markup = await get_persona_menu_content()
+    elif data == 'menu_ai_model':
+        await query.answer()
+        text, reply_markup = await get_model_menu_content()
     elif data.startswith('set_persona_'):
         persona = data.replace('set_persona_', '')
         bot_config["ai_persona"] = persona
         save_config()
-        text, reply_markup = await get_main_menu_content()
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.answer(f"✅ Kişilik '{persona}' olarak ayarlandı")
+        text, reply_markup = await get_ai_settings_menu_content()
+    elif data.startswith('set_model_'):
+        model = data.replace('set_model_', '')
+        bot_config["ai_model"] = model
+        save_config()
+        await query.answer(f"✅ Model '{model}' olarak ayarlandı")
+        text, reply_markup = await get_ai_settings_menu_content()
     elif data.startswith('add_'):
-        channel_type = data.replace('add_', '')
-        title = "Kaynak" if channel_type == 'source' else "Hedef"
+        await query.answer()
+        item_type = data.replace('add_', '')
+        context_map = {'source': 'Kaynak Kanalı', 'destination': 'Hedef Kanalı', 'admin': 'Admin ID'}
+        prompt_text = f"➕ Eklenecek yeni **{context_map[item_type]}** adını/ID'sini yazıp bu mesaja yanıt verin."
         await query.message.delete()
         context.user_data.pop('menu_message_id', None)
-        reply_text = f"➕ Eklenecek yeni **{title}** kanalının adını yazıp bu mesaja yanıt verin."
-        sent_reply_message = await query.message.reply_text(
-            reply_text,
-            reply_markup=ForceReply(selective=True),
-            parse_mode='Markdown'
-        )
-        context.user_data['force_reply_info'] = {
-            'type': f'add_channel_{channel_type}',
-            'message_id': sent_reply_message.message_id
-        }
+        sent_reply_message = await query.message.reply_text(prompt_text, reply_markup=ForceReply(selective=True), parse_mode='Markdown')
+        context.user_data['force_reply_info'] = {'type': f'add_{item_type}', 'message_id': sent_reply_message.message_id}
+        return
     elif data.startswith('remove_'):
-        _, channel_type, channel_name = data.split('_', 2)
-        config_key = f"{channel_type}_channels"
-        if channel_name in bot_config[config_key]:
-            bot_config[config_key].remove(channel_name)
+        _, item_type, item_id_str = data.split('_', 2)
+        if item_type in ["source", "destination"]:
+            config_key = f"{item_type}_channels"
+            item_id = item_id_str
+        else: # admin
+            config_key = "admin_ids"
+            item_id = int(item_id_str)
+            
+        if item_id in bot_config[config_key]:
+            bot_config[config_key].remove(item_id)
             save_config()
-        text, reply_markup = await get_channels_menu_content(channel_type)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.answer(f"🗑️ {item_id} silindi.")
+
+        if item_type in ["source", "destination"]:
+             text, reply_markup = await get_channels_menu_content(item_type)
+        else:
+             text, reply_markup = await get_admins_menu_content()
     elif data == 'menu_close':
+        await query.answer()
         await query.message.delete()
         context.user_data.pop('menu_message_id', None)
+        await query.message.reply_text("ℹ️ Menü kapatıldı. Tekrar açmak için /ayarla yazın.")
+        return
+
+    if text and reply_markup:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
 @admin_only
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or 'force_reply_info' not in context.user_data:
@@ -310,19 +367,30 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_info = context.user_data['force_reply_info']
     if update.message.reply_to_message.message_id != reply_info['message_id']:
         return
-    if reply_info['type'].startswith('add_channel_'):
-        channel_type = reply_info['type'].replace('add_channel_', '')
-        channel_name = update.message.text.strip()
-        config_key = f"{channel_type}_channels"
-        if not channel_name.startswith("@") and not channel_name.startswith("-100"):
-            channel_name = f"@{channel_name}"
-        if channel_name not in bot_config[config_key]:
-            bot_config[config_key].append(channel_name)
+    
+    item_type = reply_info['type'].replace('add_', '')
+    item_value = update.message.text.strip()
+    
+    if item_type in ['source', 'destination']:
+        config_key = f"{item_type}_channels"
+        if not item_value.startswith("@") and not item_value.startswith("-100"):
+            item_value = f"@{item_value}"
+        if item_value not in bot_config[config_key]:
+            bot_config[config_key].append(item_value)
             save_config()
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=reply_info['message_id'])
-        await update.message.delete()
-        del context.user_data['force_reply_info']
-        await setup_command(update, context)
+    elif item_type == 'admin':
+        try:
+            admin_id = int(item_value)
+            if admin_id not in bot_config['admin_ids']:
+                bot_config['admin_ids'].append(admin_id)
+                save_config()
+        except ValueError:
+            pass
+    
+    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=reply_info['message_id'])
+    await update.message.delete()
+    del context.user_data['force_reply_info']
+    await setup_command(update, context)
 
 # --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -359,7 +427,6 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     watermarked_photo = await apply_watermark(photo_bytes)
                     await context.bot.send_photo(chat_id=dest, photo=watermarked_photo, caption=final_caption)
                 elif message.video:
-                    # DÜZELTME: Daha güvenli video gönderimi
                     await context.bot.send_video(chat_id=dest, video=message.video.file_id, caption=final_caption)
                 else:
                     await context.bot.send_message(chat_id=dest, text=final_caption)
@@ -379,363 +446,68 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"İstatistik kaydı hatası: {e}")
 
-# --- Flask Web Sunucusu + AI KONTROL MERKEZİ ---
-flask_app = Flask(__name__)
-flask_app.secret_key = FLASK_SECRET_KEY
-# --- HTML Şablonları ---
-HTML_LAYOUT = """
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KRBRZ VIP - AI Kontrol Merkezi</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: auto; background-color: #1e1e1e; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h1, h2 { color: #bb86fc; border-bottom: 2px solid #373737; padding-bottom: 10px; }
-        nav { margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
-        nav a { color: #03dac6; text-decoration: none; padding: 10px 15px; border-radius: 5px; background-color: #333; transition: background-color 0.3s; }
-        nav a:hover { background-color: #444; }
-        .card { background-color: #2c2c2c; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; color: #a0a0a0; }
-        textarea, input, select { width: 95%; background-color: #333; border: 1px solid #555; color: #e0e0e0; padding: 10px; border-radius: 5px; font-size: 1em; }
-        button { background-color: #bb86fc; color: #121212; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold; transition: background-color 0.3s; }
-        button:hover { background-color: #a362f7; }
-        .persona-cards { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
-        .persona-card { flex: 1; min-width: 200px; border: 2px solid #333; padding: 15px; border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.3s; }
-        .persona-card.active { border-color: #03dac6; background-color: #03dac620; }
-        .persona-card h3 { margin-top: 0; color: #03dac6; }
-        .result { background-color: #333; padding: 15px; border-radius: 5px; margin-top: 15px; white-space: pre-wrap; font-family: Consolas, monaco, monospace; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #444; }
-        th { background-color: #333; }
-        .flash { padding: 15px; margin-bottom: 15px; border-radius: 5px; background-color: #03dac6; color: #121212; }
-        pre { background: #111; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                <div class="flash">{{ messages[0] }}</div>
-            {% endif %}
-        {% endwith %}
-        {% block content %}{% endblock %}
-    </div>
-</body>
-</html>
-"""
+# DÜZELTME: Eksik Komut Fonksiyonları Eklendi
+@admin_only
+async def list_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    source = "\n".join(f"`{ch}`" for ch in bot_config['source_channels']) or "_Yok_"
+    dest = "\n".join(f"`{ch}`" for ch in bot_config['destination_channels']) or "_Yok_"
+    text = f"📡 **Kaynak Kanallar:**\n{source}\n\n📤 **Hedef Kanallar:**\n{dest}"
+    await update.message.reply_text(text, parse_mode='Markdown')
 
-HTML_DASHBOARD = """
-{% extends "layout" %}
-{% block content %}
-    <h1>🚀 KRBRZ VIP - Gelişmiş Kontrol Merkezi</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <h2>📊 Bot Durumu</h2>
-    <div class="card">
-        <p><strong>Genel Durum:</strong> {{ '▶️ Çalışıyor' if not is_paused else '⏸️ Duraklatıldı' }}</p>
-        <p><strong>Kaynak Kanallar:</strong> {{ source_channels|length }} adet</p>
-        <p><strong>Hedef Kanallar:</strong> {{ destination_channels|length }} adet</p>
-        <form action="/toggle-pause" method="POST" style="margin-top:15px;">
-            <button type="submit">{{ 'Botu Duraklat' if not is_paused else 'Botu Devam Ettir' }}</button>
-        </form>
-    </div>
-    <h2>🎭 AI Persona Yönetimi</h2>
-    <div class="card">
-        <p>Botun kullanacağı yapay zeka kişiliğini seçin. Tüm metinler bu karaktere göre üretilecektir.</p>
-        <div class="persona-cards">
-            {% for name in personas %}
-            <div class="persona-card {% if name == active_persona %}active{% endif %}" onclick="window.location.href='/set-persona/{{ name }}'">
-                <h3>{{ name }}</h3>
-                <small>{{ personas[name][:80] }}...</small>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-{% endblock %}
-"""
-
-HTML_AI_TEST = """
-{% extends "layout" %}
-{% block content %}
-    <h1>🔬 AI Metin Test Paneli</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <div class="card">
-        <form method="POST">
-            <div class="form-group">
-                <label for="content">Test edilecek orijinal metin:</label>
-                <textarea name="content" id="content" rows="4">{{ input_text or '' }}</textarea>
-            </div>
-            <button type="submit">AI ile Geliştir (Persona: {{ active_persona }})</button>
-        </form>
-        {% if output_text %}
-        <div class="result">
-            <strong>✨ AI Sonucu:</strong><br>{{ output_text }}
-        </div>
-        {% endif %}
-    </div>
-{% endblock %}
-"""
-
-HTML_ADMINS = """
-{% extends "layout" %}
-{% block content %}
-    <h1>👥 Admin Yönetimi</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <div class="card">
-        <h2>Mevcut Adminler</h2>
-        <table>
-            <thead><tr><th>Kullanıcı ID</th><th>İşlem</th></tr></thead>
-            <tbody>
-            {% for admin_id in admin_ids %}
-                <tr>
-                    <td>{{ admin_id }} {% if admin_id == owner_id %}(👑 Kurucu){% endif %}</td>
-                    <td>
-                        {% if admin_id != owner_id %}
-                        <a href="/admins/remove/{{ admin_id }}">Sil</a>
-                        {% endif %}
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    <div class="card">
-        <h2>Yeni Admin Ekle</h2>
-        <form method="POST">
-            <div class="form-group">
-                <label for="new_admin_id">Telegram Kullanıcı ID:</label>
-                <input type="number" name="new_admin_id" required>
-            </div>
-            <button type="submit">Ekle</button>
-        </form>
-    </div>
-{% endblock %}
-"""
-
-HTML_WATERMARK = """
-{% extends "layout" %}
-{% block content %}
-    <h1>💧 Filigran Ayarları</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <div class="card">
-        <form method="POST">
-            <div class="form-group">
-                <label for="text">Filigran Metni:</label>
-                <input type="text" name="text" value="{{ watermark.text }}">
-            </div>
-            <div class="form-group">
-                <label for="color">Renk:</label>
-                <select name="color">
-                    <option value="beyaz" {% if watermark.color == 'beyaz' %}selected{% endif %}>Beyaz</option>
-                    <option value="siyah" {% if watermark.color == 'siyah' %}selected{% endif %}>Siyah</option>
-                    <option value="kirmizi" {% if watermark.color == 'kirmizi' %}selected{% endif %}>Kırmızı</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="position">Pozisyon:</label>
-                <select name="position">
-                    <option value="sag-alt" {% if watermark.position == 'sag-alt' %}selected{% endif %}>Sağ Alt</option>
-                    <option value="sol-ust" {% if watermark.position == 'sol-ust' %}selected{% endif %}>Sol Üst</option>
-                </select>
-            </div>
-            <button type="submit">Kaydet</button>
-        </form>
-    </div>
-{% endblock %}
-"""
-
-HTML_STATS = """
-{% extends "layout" %}
-{% block content %}
-    <h1>📊 İstatistikler</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <div class="card">
-        <h2>Günlük Mesaj İstatistikleri</h2>
-        {% if stats %}
-        <table>
-            <thead><tr><th>Tarih</th><th>Toplam Mesaj</th></tr></thead>
-            <tbody>
-            {% for row in stats %}
-                <tr>
-                    <td>{{ row.day }}</td>
-                    <td>{{ row.count }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p>Henüz görüntülenecek istatistik yok.</p>
-        {% endif %}
-    </div>
-{% endblock %}
-"""
-
-HTML_LOGS = """
-{% extends "layout" %}
-{% block content %}
-    <h1>📝 Bot Logları</h1>
-    <nav>
-        <a href="/">Gösterge Paneli</a>
-        <a href="/ai-test">AI Metin Test</a>
-        <a href="/admins">Admin Yönetimi</a>
-        <a href="/watermark">Filigran Ayarları</a>
-        <a href="/stats">İstatistikler</a>
-        <a href="/logs">Loglar</a>
-    </nav>
-    <div class="card">
-        <h2>Son 100 Log Kaydı</h2>
-        <pre>{{ logs }}</pre>
-    </div>
-{% endblock %}
-"""
-
-@flask_app.route('/')
-def home():
-    context = {
-        "is_paused": bot_config.get('is_paused', False),
-        "source_channels": bot_config.get('source_channels', []),
-        "destination_channels": bot_config.get('destination_channels', []),
-        "active_persona": bot_config.get('ai_persona'),
-        "personas": bot_config.get('personas', {})
-    }
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_DASHBOARD)
-    return render_template_string(full_html, **context)
-
-@flask_app.route('/toggle-pause', methods=['POST'])
-def toggle_pause_web():
-    bot_config["is_paused"] = not bot_config.get("is_paused", False)
-    save_config()
-    flash("Bot durumu güncellendi.")
-    return redirect(url_for('home'))
-
-@flask_app.route('/set-persona/<string:name>')
-def set_persona(name):
-    if name in bot_config.get('personas', {}):
-        bot_config['ai_persona'] = name
-        save_config()
-        flash(f"AI Kişiliği '{name}' olarak ayarlandı.")
-    return redirect(url_for('home'))
-
-@flask_app.route('/ai-test', methods=['GET', 'POST'])
-def ai_test():
-    input_text, output_text = "", ""
-    if request.method == 'POST':
-        input_text = request.form.get('content')
-        if input_text:
-            try:
-                # DÜZELTME: Daha güvenli asenkron çalıştırma
-                output_text = asyncio.run(enhance_text_with_gemini_smarter(input_text))
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                output_text = loop.run_until_complete(enhance_text_with_gemini_smarter(input_text))
-                loop.close()
-    context = { "active_persona": bot_config.get('ai_persona'), "input_text": input_text, "output_text": output_text }
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_AI_TEST)
-    return render_template_string(full_html, **context)
-
-@flask_app.route('/admins', methods=['GET', 'POST'])
-def manage_admins():
-    if request.method == 'POST':
-        new_admin_id = int(request.form.get('new_admin_id'))
-        if new_admin_id not in bot_config['admin_ids']:
-            bot_config['admin_ids'].append(new_admin_id)
-            save_config()
-            flash(f"Admin {new_admin_id} eklendi.")
-    context = {"admin_ids": bot_config.get('admin_ids', []), "owner_id": ADMIN_USER_ID}
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_ADMINS)
-    return render_template_string(full_html, **context)
-
-@flask_app.route('/admins/remove/<int:admin_id>')
-def remove_admin(admin_id):
-    if admin_id != ADMIN_USER_ID and admin_id in bot_config['admin_ids']:
-        bot_config['admin_ids'].remove(admin_id)
-        save_config()
-        flash(f"Admin {admin_id} silindi.")
-    return redirect(url_for('manage_admins'))
-
-@flask_app.route('/watermark', methods=['GET', 'POST'])
-def manage_watermark():
-    if request.method == 'POST':
-        bot_config['watermark']['text'] = request.form.get('text')
-        bot_config['watermark']['color'] = request.form.get('color')
-        bot_config['watermark']['position'] = request.form.get('position')
-        save_config()
-        flash("Filigran ayarları kaydedildi.")
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_WATERMARK)
-    return render_template_string(full_html, watermark=bot_config.get('watermark', {}))
-
-@flask_app.route('/stats')
-def show_stats():
+@admin_only
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('bot_data.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT date(timestamp) as day, COUNT(*) as count FROM message_stats GROUP BY day ORDER BY day DESC LIMIT 30")
-    stats_data = [{"day": row[0], "count": row[1]} for row in cursor.fetchall()]
+    cursor.execute("SELECT date(timestamp) as day, COUNT(*) as count FROM message_stats WHERE date(timestamp) = date('now')")
+    today_stats = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM message_stats")
+    total_stats = cursor.fetchone()
     conn.close()
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_STATS)
-    return render_template_string(full_html, stats=stats_data)
-
-@flask_app.route('/logs')
-def show_logs():
+    
+    today_count = today_stats[1] if today_stats and today_stats[1] is not None else 0
+    total_count = total_stats[0] if total_stats and total_stats[0] is not None else 0
+    
+    text = f"📊 **Mesaj İstatistikleri**\n\n- **Bugün İşlenen:** `{today_count}`\n- **Toplam İşlenen:** `{total_count}`"
+    await update.message.reply_text(text, parse_mode='Markdown')
+    
+@admin_only
+async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         with open(LOG_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            log_content = "".join(lines[-100:])
+            log_content = "".join(lines[-20:]) # Son 20 satırı gönder
+        if not log_content: log_content = "Log dosyası boş."
+        await update.message.reply_text(f"📝 **Son 20 Log Kaydı:**\n\n`{log_content}`", parse_mode='Markdown')
     except FileNotFoundError:
-        log_content = "Log dosyası henüz oluşturulmadı."
-    full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_LOGS)
-    return render_template_string(full_html, logs=log_content)
+        await update.message.reply_text("Log dosyası henüz oluşturulmadı.")
+
+@admin_only
+async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Kullanım: `/testai <denenecek metin>`")
+        return
+    
+    original_text = " ".join(context.args)
+    await update.message.reply_chat_action('typing')
+    enhanced_text = await enhance_text_with_gemini_smarter(original_text)
+    await update.message.reply_text(f"**Orijinal:**\n`{original_text}`\n\n**✨ AI Sonucu ({bot_config['ai_persona']}):**\n`{enhanced_text}`", parse_mode='Markdown')
+
 
 # --- Botun Başlatılması ---
 def main():
-    logger.info("🚀 KRBRZ VIP Bot başlatılıyor...")
+    logger.info("🚀 KRBRZ VIP Bot başlatılıyor (Sadece Telegram Modu)...")
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("ayarla", setup_command))
     application.add_handler(CommandHandler("durum", status_command))
     application.add_handler(CommandHandler("durdur", pause_command))
+    application.add_handler(CommandHandler("kanallar", list_channels_command))
+    application.add_handler(CommandHandler("istatistik", stats_command))
+    application.add_handler(CommandHandler("loglar", logs_command))
+    application.add_handler(CommandHandler("testai", test_ai_command))
     
     application.add_handler(CallbackQueryHandler(menu_callback_handler))
-    # DÜZELTME: filters.REPLY, kütüphane versiyonuna göre uyumlu hale getirildi.
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, reply_handler))
     
     application.add_handler(MessageHandler(filters.ALL & filters.ChatType.CHANNEL, forwarder))
@@ -743,11 +515,6 @@ def main():
     logger.info("✅ Bot başarıyla yapılandırıldı ve dinlemede.")
     application.run_polling(drop_pending_updates=True)
 
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False)
-
 if __name__ == "__main__":
-    Thread(target=run_flask, daemon=True).start()
-    logger.info(f"🌐 Flask sunucusu {PORT} portunda başlatıldı.")
     main()
 
