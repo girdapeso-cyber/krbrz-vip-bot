@@ -26,7 +26,8 @@ from functools import lru_cache
 import uuid
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import time
-from flask import Flask
+from flask import Flask, render_template_string, request, redirect, url_for, flash
+from threading import Thread
 
 # --- Güvenli Ortam Değişkenleri ---
 try:
@@ -185,7 +186,6 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
         return original_text + " @KRBRZ063 #KRBRZ"
 
 async def generate_automated_post(application: Application) -> None:
-    # ... (Aynı) ...
     logger.info("Otomatik gönderi zamanı geldi, AI içerik üretiyor...")
     if not GEMINI_API_KEY: 
         logger.warning("Otomatik gönderi için Gemini API anahtarı bulunamadı.")
@@ -205,14 +205,12 @@ async def generate_automated_post(application: Application) -> None:
         except Exception as e:
             logger.error(f"Otomatik gönderi hatası ({dest}): {e}")
 async def generate_user_reply(user_message: str) -> str:
-    # ... (Aynı) ...
     if not GEMINI_API_KEY: return "Merhaba, KRBRZ VIP ile ilgilendiğiniz için teşekkürler. Detaylar için ana kanalımızı takip edin."
     persona = get_ai_persona_prompt("Profesyonel Satıcı")
     user_prompt = f"Bir müşteri sana şu soruyu sordu: '{user_message}'. Ona KRBRZ VIP ürününü tanıtan, ana kanala yönlendiren, kibar ve profesyonel bir yanıt yaz."
     
     return await enhance_text_with_gemini_smarter(user_prompt)
 async def apply_watermark(photo_bytes: bytes) -> bytes:
-    # ... (Aynı) ...
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"): return photo_bytes
     try:
@@ -258,7 +256,6 @@ def admin_only(func):
 
 @admin_only
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (Aynı) ...
     await update.message.reply_text(
         "🚀 **KRBRZ VIP Bot Aktif!**\n\n"
         "Tüm komutları görmek ve ayarları yönetmek için `/ayarla` yazın."
@@ -266,7 +263,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 @admin_only
 async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (Aynı) ...
     bot_config["is_paused"] = not bot_config.get("is_paused", False)
     save_config()
     status_text = "⏸️ Duraklatıldı" if bot_config["is_paused"] else "▶️ Devam Ettiriliyor"
@@ -274,7 +270,6 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- YENİ TELEGRAM KONTROL MERKEZİ ---
 async def get_main_menu_content():
-    # ... (Aynı) ...
     text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
     image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
@@ -290,7 +285,6 @@ async def get_main_menu_content():
     ]
     return text, InlineKeyboardMarkup(keyboard)
 async def get_channels_menu_content(channel_type: str):
-    # ... (Aynı) ...
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
@@ -300,7 +294,6 @@ async def get_channels_menu_content(channel_type: str):
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
 async def get_admins_menu_content():
-    # ... (Aynı) ...
     admins = bot_config.get('admin_ids', [])
     text = "👥 **Admin Yönetimi**\n\nMevcut adminler:\n" + ("\n".join(f"`{admin_id}`" for admin_id in admins) or "_Boş_")
     keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {admin_id}", callback_data=f'remove_admin_{admin_id}')] for admin_id in admins if admin_id != ADMIN_USER_ID]
@@ -308,7 +301,6 @@ async def get_admins_menu_content():
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
 async def get_ai_settings_menu_content():
-    # ... (Aynı) ...
     text = f"🧠 **AI Ayarları**\n\n- Aktif Model: `{bot_config['ai_model']}`\n- Aktif Persona: `{bot_config['ai_persona']}`"
     keyboard = [
         [InlineKeyboardButton("🤖 Modeli Değiştir", callback_data='menu_ai_model')],
@@ -317,7 +309,6 @@ async def get_ai_settings_menu_content():
     ]
     return text, InlineKeyboardMarkup(keyboard)
 async def get_persona_menu_content():
-    # ... (Aynı) ...
     text = "🎭 Yapay zeka için bir kişilik seçin:"
     keyboard = [
         [InlineKeyboardButton(f"{'➡️ ' if bot_config['ai_persona'] == p else ''}{p}", callback_data=f'set_persona_{p}')] for p in bot_config['personas']
@@ -325,7 +316,6 @@ async def get_persona_menu_content():
     keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
     return text, InlineKeyboardMarkup(keyboard)
 async def get_model_menu_content():
-    # ... (Aynı) ...
     text = "🤖 Kullanılacak AI modelini seçin:"
     models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]
     keyboard = [
@@ -335,7 +325,6 @@ async def get_model_menu_content():
     return text, InlineKeyboardMarkup(keyboard)
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (Aynı) ...
     if 'menu_message_id' in context.user_data:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data.pop('menu_message_id'))
@@ -344,7 +333,6 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     context.user_data['menu_message_id'] = sent_message.message_id
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (Aynı) ...
     query = update.callback_query
     data = query.data
     text, reply_markup = None, None
@@ -428,7 +416,6 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 @admin_only
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (Aynı) ...
     if not update.message.reply_to_message or 'force_reply_info' not in context.user_data:
         return
     reply_info = context.user_data['force_reply_info']
@@ -457,7 +444,6 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await setup_command(update, context)
 
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # DÜZELTME: @admin_only dekoratörü kaldırıldı.
     if bot_config["is_paused"]: return
     message = update.channel_post
     if not message: return
