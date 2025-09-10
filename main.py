@@ -25,12 +25,16 @@ from telegram.ext import (
 from functools import lru_cache
 import uuid
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from flask import Flask, render_template_string, request, redirect, url_for, flash
+from threading import Thread
 
 # --- Güvenli Ortam Değişkenleri ---
 try:
     BOT_TOKEN = os.environ['BOT_TOKEN']
     ADMIN_USER_ID = int(os.environ['ADMIN_USER_ID'])
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+    PORT = int(os.environ.get('PORT', 5000))
+    FLASK_SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'varsayilan_cok_guvenli_bir_anahtar_:)')
 except (KeyError, ValueError) as e:
     print(f"!!! HATA: Gerekli environment variable bulunamadı: {e}")
     exit()
@@ -94,6 +98,7 @@ def get_ai_persona_prompt(persona: str) -> str:
 
 @lru_cache(maxsize=50)
 async def generate_content_from_image(image_bytes: bytes) -> Dict:
+    # ... (Önceki versiyonla aynı)
     if not GEMINI_API_KEY: 
         return {
             "suggestions": [{"tactic": "Default", "captions": {"tr": "🔥 Zirve bizimdir! 👑 @KRBRZ063"}}],
@@ -136,7 +141,7 @@ async def generate_content_from_image(image_bytes: bytes) -> Dict:
         return {}
 
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
-    """Metin tabanlı AI geliştirmesi için fonksiyon."""
+    # ... (Önceki versiyonla aynı)
     if not GEMINI_API_KEY or not original_text: return original_text + " @KRBRZ063 #KRBRZ"
     model_name = bot_config.get("ai_model", "gemini-1.5-pro-latest")
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
@@ -154,7 +159,7 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
         return original_text + " @KRBRZ063 #KRBRZ"
 
 async def generate_automated_post(application: Application) -> None:
-    """Otomatik gönderi için AI ile satış metni üretir ve gönderir."""
+    # ... (Önceki versiyonla aynı)
     logger.info("Otomatik gönderi zamanı geldi, AI içerik üretiyor...")
     if not GEMINI_API_KEY: 
         logger.warning("Otomatik gönderi için Gemini API anahtarı bulunamadı.")
@@ -175,7 +180,7 @@ async def generate_automated_post(application: Application) -> None:
             logger.error(f"Otomatik gönderi hatası ({dest}): {e}")
 
 async def generate_user_reply(user_message: str) -> str:
-    """Kullanıcı mesajlarına AI ile yanıt verir."""
+    # ... (Önceki versiyonla aynı)
     if not GEMINI_API_KEY: return "Merhaba, KRBRZ VIP ile ilgilendiğiniz için teşekkürler. Detaylar için ana kanalımızı takip edin."
     persona = get_ai_persona_prompt("Profesyonel Satıcı")
     user_prompt = f"Bir müşteri sana şu soruyu sordu: '{user_message}'. Ona KRBRZ VIP ürününü tanıtan, ana kanala yönlendiren, kibar ve profesyonel bir yanıt yaz."
@@ -183,8 +188,8 @@ async def generate_user_reply(user_message: str) -> str:
     return await enhance_text_with_gemini_smarter(user_prompt)
 
 # --- Filigran Fonksiyonu ---
+# ... (Önceki versiyonla aynı)
 async def apply_watermark(photo_bytes: bytes) -> bytes:
-    # ... (Önceki versiyonla aynı) ...
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"): return photo_bytes
     try:
@@ -244,6 +249,7 @@ async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- YENİ TELEGRAM KONTROL MERKEZİ ---
 async def get_main_menu_content():
+    # ... (Önceki versiyonla aynı)
     text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
     image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
@@ -258,8 +264,8 @@ async def get_main_menu_content():
         [InlineKeyboardButton("✅ Menüyü Kapat", callback_data='menu_close')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
-
 async def get_channels_menu_content(channel_type: str):
+    # ... (Önceki versiyonla aynı)
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
     title = "Kaynak" if channel_type == 'source' else "Hedef"
@@ -268,16 +274,16 @@ async def get_channels_menu_content(channel_type: str):
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
-
 async def get_admins_menu_content():
+    # ... (Önceki versiyonla aynı)
     admins = bot_config.get('admin_ids', [])
     text = "👥 **Admin Yönetimi**\n\nMevcut adminler:\n" + ("\n".join(f"`{admin_id}`" for admin_id in admins) or "_Boş_")
     keyboard = [[InlineKeyboardButton(f"🗑️ Sil: {admin_id}", callback_data=f'remove_admin_{admin_id}')] for admin_id in admins if admin_id != ADMIN_USER_ID]
     keyboard.append([InlineKeyboardButton("➕ Yeni Admin Ekle", callback_data=f'add_admin')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
-    
 async def get_ai_settings_menu_content():
+    # ... (Önceki versiyonla aynı)
     text = f"🧠 **AI Ayarları**\n\n- Aktif Model: `{bot_config['ai_model']}`\n- Aktif Persona: `{bot_config['ai_persona']}`"
     keyboard = [
         [InlineKeyboardButton("🤖 Modeli Değiştir", callback_data='menu_ai_model')],
@@ -285,16 +291,16 @@ async def get_ai_settings_menu_content():
         [InlineKeyboardButton("⬅️ Geri", callback_data='menu_main')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
-
 async def get_persona_menu_content():
+    # ... (Önceki versiyonla aynı)
     text = "🎭 Yapay zeka için bir kişilik seçin:"
     keyboard = [
         [InlineKeyboardButton(f"{'➡️ ' if bot_config['ai_persona'] == p else ''}{p}", callback_data=f'set_persona_{p}')] for p in bot_config['personas']
     ]
     keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
     return text, InlineKeyboardMarkup(keyboard)
-
 async def get_model_menu_content():
+    # ... (Önceki versiyonla aynı)
     text = "🤖 Kullanılacak AI modelini seçin:"
     models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]
     keyboard = [
@@ -302,9 +308,9 @@ async def get_model_menu_content():
     ]
     keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
     return text, InlineKeyboardMarkup(keyboard)
-
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Önceki versiyonla aynı)
     if 'menu_message_id' in context.user_data:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=context.user_data.pop('menu_message_id'))
@@ -312,26 +318,22 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, reply_markup = await get_main_menu_content()
     sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     context.user_data['menu_message_id'] = sent_message.message_id
-
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Önceki versiyonla aynı)
     query = update.callback_query
     data = query.data
-    
     text, reply_markup = None, None
-
     toggle_map = {"toggle_text_ai": "Akıllı Metin", "toggle_image_ai": "Akıllı Görüntü", "toggle_watermark": "Filigran", "toggle_auto_post": "Otomatik Gönderi"}
     if data in toggle_map:
         await query.answer()
         key_part = data.replace('toggle_', '')
         config_key = 'enabled' if key_part == 'watermark' else f'{key_part}_enabled'
         target_dict = bot_config['watermark'] if key_part == 'watermark' else bot_config
-
         target_dict[config_key] = not target_dict[config_key]
         status = "açıldı" if target_dict[config_key] else "kapatıldı"
         await query.answer(f"✅ {toggle_map[data]} {status}", show_alert=True)
         save_config()
         text, reply_markup = await get_main_menu_content()
-    
     elif data == 'menu_main':
         await query.answer()
         text, reply_markup = await get_main_menu_content()
@@ -383,12 +385,10 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             config_key = "admin_ids"
             item_id = int(item_id_str)
-            
         if item_id in bot_config[config_key]:
             bot_config[config_key].remove(item_id)
             save_config()
             await query.answer(f"🗑️ {item_id} silindi.", show_alert=True)
-
         if item_type in ["source", "destination"]:
              text, reply_markup = await get_channels_menu_content(item_type)
         else:
@@ -399,21 +399,18 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.pop('menu_message_id', None)
         await query.message.reply_text("ℹ️ Menü kapatıldı. Tekrar açmak için /ayarla yazın.")
         return
-
     if text and reply_markup:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-
 @admin_only
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Önceki versiyonla aynı)
     if not update.message.reply_to_message or 'force_reply_info' not in context.user_data:
         return
     reply_info = context.user_data['force_reply_info']
     if update.message.reply_to_message.message_id != reply_info['message_id']:
         return
-    
     item_type = reply_info['type'].replace('add_', '')
     item_value = update.message.text.strip()
-    
     if item_type in ['source', 'destination']:
         config_key = f"{item_type}_channels"
         if not item_value.startswith("@") and not item_value.startswith("-100"):
@@ -429,12 +426,12 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_config()
         except ValueError:
             pass
-    
     await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=reply_info['message_id'])
     await update.message.delete()
     del context.user_data['force_reply_info']
     await setup_command(update, context)
 
+# --- Ana Mesaj Yönlendirici ---
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_config["is_paused"]: return
     message = update.channel_post
@@ -447,7 +444,6 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ai_used = False
     try:
-        final_caption = ""
         photo_bytes = None
         if message.photo:
             file = await message.photo[-1].get_file()
@@ -488,20 +484,26 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
-        else:
-            final_caption = message.caption or (message.text or "")
-            if "@KRBRZ063" not in final_caption:
-                 final_caption += "\n\n@KRBRZ063 #KRBRZ"
-            
-            for dest in bot_config["destination_channels"]:
-                try:
-                    if message.video:
-                        await context.bot.send_video(chat_id=dest, video=message.video.file_id, caption=final_caption)
-                    else:
-                        await message.copy(chat_id=dest, caption=final_caption)
-                    logger.info(f"Mesaj {dest} kanalına başarıyla yönlendirildi.")
-                except Exception as e:
-                    logger.error(f"{dest} kanalına yönlendirme hatası: {e}")
+        
+        # Eğer fotoğraf yoksa veya AI kapalıysa direkt gönder
+        final_caption = message.caption or (message.text or "")
+        if bot_config["ai_text_enhancement_enabled"] and not message.photo and message.text:
+             final_caption = await enhance_text_with_gemini_smarter(message.text)
+             ai_used = True
+        elif "@KRBRZ063" not in final_caption:
+             final_caption += "\n\n@KRBRZ063 #KRBRZ"
+        
+        for dest in bot_config["destination_channels"]:
+            try:
+                if message.video:
+                    await context.bot.send_video(chat_id=dest, video=message.video.file_id, caption=final_caption)
+                elif message.text:
+                    await context.bot.send_message(chat_id=dest, text=final_caption)
+                else: # Diğer medya türleri
+                    await message.copy(chat_id=dest)
+                logger.info(f"Mesaj {dest} kanalına başarıyla yönlendirildi.")
+            except Exception as e:
+                logger.error(f"{dest} kanalına yönlendirme hatası: {e}")
     except Exception as e:
         logger.error(f"Genel yönlendirici hatası: {e}")
     
