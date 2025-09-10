@@ -13,7 +13,7 @@ import base64
 import sqlite3
 import asyncio
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
 from typing import List, Dict
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -62,44 +62,46 @@ init_database()
 
 # --- Konfigürasyon Yönetimi ---
 CONFIG_FILE = "bot_config.json"
+config_lock = Lock() # DÜZELTME: Race condition'ı engellemek için kilit
 
 def load_config():
-    defaults = {
-        "source_channels": [],
-        "destination_channels": [],
-        "is_paused": False,
-        "ai_text_enhancement_enabled": True,
-        "ai_image_analysis_enabled": True,
-        "ai_persona": "Agresif Pazarlamacı",
-        "personas": {
-            "Agresif Pazarlamacı": "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun.",
-            "Profesyonel Satıcı": "Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun.",
-            "Eğlenceli Oyuncu": "Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun."
-        },
-        "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
-        "statistics_enabled": True,
-        "admin_ids": [], # Çoklu admin sistemi için
-    }
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            defaults.update(config)
-    
-    if ADMIN_USER_ID not in defaults['admin_ids']:
-        defaults['admin_ids'].append(ADMIN_USER_ID)
+    with config_lock:
+        defaults = {
+            "source_channels": [],
+            "destination_channels": [],
+            "is_paused": False,
+            "ai_text_enhancement_enabled": True,
+            "ai_image_analysis_enabled": True,
+            "ai_persona": "Agresif Pazarlamacı",
+            "personas": {
+                "Agresif Pazarlamacı": "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun.",
+                "Profesyonel Satıcı": "Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun.",
+                "Eğlenceli Oyuncu": "Sen yetenekli ve eğlenceli bir PUBG oyuncususun. Takipçilerinle samimi bir dille konuşuyorsun. Esprili, enerjik ve oyuncu jargonuna hakim bir dil kullan. Emojileri (😂, 😎, 🎉, 🎮) bolca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGMobile #Oyun #Eğlence' etiketleri bulunsun."
+            },
+            "watermark": {"text": "KRBRZ_VIP", "position": "sag-alt", "color": "beyaz", "enabled": True},
+            "statistics_enabled": True,
+            "admin_ids": [], # Çoklu admin sistemi için
+        }
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                defaults.update(config)
         
-    return defaults
+        if ADMIN_USER_ID not in defaults['admin_ids']:
+            defaults['admin_ids'].append(ADMIN_USER_ID)
+            
+        return defaults
 
 bot_config = load_config()
 
 def save_config():
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(bot_config, f, indent=4, ensure_ascii=False)
+    with config_lock:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(bot_config, f, indent=4, ensure_ascii=False)
 
 # --- YAPAY ZEKAYI DAHA AKILLI HALE GETİREN FONKSİYONLAR ---
 def get_ai_persona_prompt(persona: str) -> str:
     return bot_config.get("personas", {}).get(persona, "Normal bir şekilde yaz.")
-
 @lru_cache(maxsize=100)
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
     if not GEMINI_API_KEY or not original_text: return original_text + " @KRBRZ063 #KRBRZ"
@@ -112,11 +114,11 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            # DÜZELTME: Güvenli veri erişimi
+            return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or original_text
     except Exception as e:
         logger.error(f"Akıllı Metin API hatası: {e}")
         return original_text + " @KRBRZ063 #KRBRZ"
-
 async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
     if not GEMINI_API_KEY: return "@KRBRZ063 #KRBRZ"
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
@@ -129,7 +131,8 @@ async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
             response = await client.post(api_url, json=payload)
             response.raise_for_status()
             result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            # DÜZELTME: Güvenli veri erişimi
+            return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or "Zirve bizimdir! 👑"
     except Exception as e:
         logger.error(f"Akıllı Görüntü API hatası: {e}")
         return "Zirve bizimdir! 👑 @KRBRZ063 #PUBGHACK #KRBRZ"
@@ -138,22 +141,23 @@ async def generate_caption_from_image_smarter(image_bytes: bytes) -> str:
 async def apply_watermark(photo_bytes: bytes) -> bytes:
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"): return photo_bytes
+    logger.info("Filigran uygulanıyor...")
     try:
         with Image.open(io.BytesIO(photo_bytes)).convert("RGBA") as base:
             txt = Image.new("RGBA", base.size, (255, 255, 255, 0))
             font_size = max(15, base.size[1] // 25)
             font = None
-            # İYİLEŞTİRME: Yaygın font yollarını dene
             font_paths = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'arial.ttf', '/System/Library/Fonts/Supplemental/Arial.ttf']
             for path in font_paths:
                 try:
                     font = ImageFont.truetype(path, size=font_size)
+                    logger.info(f"Font bulundu: {path}")
                     break
                 except IOError:
                     continue
             if not font:
+                logger.warning("Uygun font bulunamadı, varsayılan font kullanılıyor.")
                 font = ImageFont.load_default()
-
             d = ImageDraw.Draw(txt)
             colors = {"beyaz": (255, 255, 255, 180),"siyah": (0, 0, 0, 180),"kirmizi": (255, 0, 0, 180)}
             fill_color = colors.get(wm_config.get("color", "beyaz").lower(), (255, 255, 255, 180))
@@ -168,6 +172,7 @@ async def apply_watermark(photo_bytes: bytes) -> bytes:
             buffer = io.BytesIO()
             out.convert("RGB").save(buffer, format="JPEG", quality=95)
             buffer.seek(0)
+            logger.info("Filigran başarıyla uygulandı.")
             return buffer.getvalue()
     except Exception as e:
         logger.error(f"Filigran hatası: {e}")
@@ -191,12 +196,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 `/durdur` - Botun mesaj iletmesini duraklatır/başlatır."
         , parse_mode='Markdown'
     )
-
 @admin_only
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = "▶️ Çalışıyor ve Mesajları İletiyor" if not bot_config.get('is_paused') else "⏸️ Duraklatıldı"
     await update.message.reply_text(f"✅ Bot Aktif!\n\n**Durum:** {status}", parse_mode='Markdown')
-
 @admin_only
 async def pause_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_config["is_paused"] = not bot_config.get("is_paused", False)
@@ -209,7 +212,7 @@ async def get_main_menu_content():
     text_ai_status = "✅" if bot_config["ai_text_enhancement_enabled"] else "❌"
     image_ai_status = "✅" if bot_config["ai_image_analysis_enabled"] else "❌"
     wm_status = "✅" if bot_config['watermark']['enabled'] else "❌"
-    text = "🚀 **KRBRZ VIP Bot Yönetim Paneli**"
+    text = "🚀 **KRBRZ VIP - Gelişmiş Kontrol Merkezi**"
     keyboard = [
         [InlineKeyboardButton("📡 Kaynak Kanalları", callback_data='menu_channels_source'), InlineKeyboardButton("📤 Hedef Kanalları", callback_data='menu_channels_destination')],
         [InlineKeyboardButton(f"{text_ai_status} Akıllı Metin", callback_data='toggle_text_ai'), InlineKeyboardButton(f"{image_ai_status} Akıllı Görüntü", callback_data='toggle_image_ai')],
@@ -332,15 +335,7 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         and str(message.chat.id) not in bot_config["source_channels"]
     ):
         return
-    try:
-        conn = sqlite3.connect('bot_data.db')
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO message_stats (channel_id, message_type) VALUES (?, ?)", 
-                       (chat_identifier, 'photo' if message.photo else 'text'))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"İstatistik kaydı hatası: {e}")
+    ai_used = False
     try:
         final_caption = ""
         photo_bytes = None
@@ -350,8 +345,10 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             photo_bytes = bytes(photo_bytes)
         if message.caption and bot_config["ai_text_enhancement_enabled"]:
             final_caption = await enhance_text_with_gemini_smarter(message.caption)
+            ai_used = True
         elif photo_bytes and bot_config["ai_image_analysis_enabled"]:
             final_caption = await generate_caption_from_image_smarter(photo_bytes)
+            ai_used = True
         else:
              final_caption = message.caption or message.text or ""
              if "@KRBRZ063" not in final_caption:
@@ -362,7 +359,8 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     watermarked_photo = await apply_watermark(photo_bytes)
                     await context.bot.send_photo(chat_id=dest, photo=watermarked_photo, caption=final_caption)
                 elif message.video:
-                    await message.copy(chat_id=dest, caption=final_caption)
+                    # DÜZELTME: Daha güvenli video gönderimi
+                    await context.bot.send_video(chat_id=dest, video=message.video.file_id, caption=final_caption)
                 else:
                     await context.bot.send_message(chat_id=dest, text=final_caption)
                 logger.info(f"Mesaj {dest} kanalına başarıyla yönlendirildi.")
@@ -370,11 +368,20 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"{dest} kanalına yönlendirme hatası: {e}")
     except Exception as e:
         logger.error(f"Genel yönlendirici hatası: {e}")
+    
+    try:
+        conn = sqlite3.connect('bot_data.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO message_stats (channel_id, message_type, ai_enhanced) VALUES (?, ?, ?)", 
+                       (chat_identifier, 'photo' if message.photo else 'text', ai_used))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"İstatistik kaydı hatası: {e}")
 
 # --- Flask Web Sunucusu + AI KONTROL MERKEZİ ---
 flask_app = Flask(__name__)
 flask_app.secret_key = FLASK_SECRET_KEY
-
 # --- HTML Şablonları ---
 HTML_LAYOUT = """
 <!DOCTYPE html>
@@ -424,7 +431,7 @@ HTML_LAYOUT = """
 HTML_DASHBOARD = """
 {% extends "layout" %}
 {% block content %}
-    <h1>🚀 KRBRZ VIP - AI Kontrol Merkezi</h1>
+    <h1>🚀 KRBRZ VIP - Gelişmiş Kontrol Merkezi</h1>
     <nav>
         <a href="/">Gösterge Paneli</a>
         <a href="/ai-test">AI Metin Test</a>
@@ -653,13 +660,14 @@ def ai_test():
     if request.method == 'POST':
         input_text = request.form.get('content')
         if input_text:
-            # İYİLEŞTİRME: Daha güvenli asenkron çalıştırma
             try:
+                # DÜZELTME: Daha güvenli asenkron çalıştırma
                 output_text = asyncio.run(enhance_text_with_gemini_smarter(input_text))
-            except RuntimeError: # Zaten bir event loop çalışıyorsa
+            except RuntimeError:
                 loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 output_text = loop.run_until_complete(enhance_text_with_gemini_smarter(input_text))
-
+                loop.close()
     context = { "active_persona": bot_config.get('ai_persona'), "input_text": input_text, "output_text": output_text }
     full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_AI_TEST)
     return render_template_string(full_html, **context)
@@ -710,7 +718,7 @@ def show_logs():
     try:
         with open(LOG_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            log_content = "".join(lines[-100:]) # Son 100 satırı göster
+            log_content = "".join(lines[-100:])
     except FileNotFoundError:
         log_content = "Log dosyası henüz oluşturulmadı."
     full_html = HTML_LAYOUT.replace('{% block content %}{% endblock %}', HTML_LOGS)
