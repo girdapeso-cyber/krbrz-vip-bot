@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 KRBRZ VIP Bot - Gelişmiş AI ile Telegram Botu
-Bu versiyon, API limitlerine karşı "Exponential Backoff" mekanizması ile güçlendirilmiştir.
+Bu versiyon, interaktif AI başlık öneri sistemi içerir ve tüm kontrol Telegram'dadır.
 """
 
 # --- Gerekli Kütüphaneler ---
@@ -25,7 +25,6 @@ from telegram.ext import (
 from functools import lru_cache
 import uuid
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import time
 
 # --- Güvenli Ortam Değişkenleri ---
 try:
@@ -65,8 +64,7 @@ def load_config():
         defaults = {
             "source_channels": [], "destination_channels": [], "is_paused": False,
             "ai_text_enhancement_enabled": True, "ai_image_analysis_enabled": True,
-            "ai_model": "gemini-1.5-flash-latest", # Varsayılan model Flash olarak ayarlandı.
-            "ai_persona": "Agresif Pazarlamacı",
+            "ai_model": "gemini-1.5-pro-latest", "ai_persona": "Agresif Pazarlamacı",
             "personas": {
                 "Agresif Pazarlamacı": "Sen PUBG hileleri satan agresif ve iddialı bir pazarlamacısın. Kısa, dikkat çekici ve güçlü ifadeler kullan. Rakiplerine göz dağı ver. Emojileri (🔥, 👑, 🚀, ☠️) cesurca kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBGHACK #KRBRZ #Zirve' etiketleri bulunsun.",
                 "Profesyonel Satıcı": "Sen PUBG bypass hizmeti sunan profesyonel ve güvenilir bir satıcısın. Net, bilgilendirici ve ikna edici bir dil kullan. Güvenilirlik ve kalite vurgusu yap. Emojileri (✅, 💯, 🛡️, 🏆) yerinde kullan. Cümlelerin sonunda mutlaka '@KRBRZ063' ve '#PUBG #Bypass #Güvenilir' etiketleri bulunsun.",
@@ -91,34 +89,6 @@ def save_config():
             json.dump(bot_config, f, indent=4, ensure_ascii=False)
 
 # --- YAPAY ZEKA FONKSİYONLARI ---
-
-async def api_request_with_backoff(api_url: str, payload: Dict) -> Dict:
-    """API'ye üstel geri çekilme ile istek gönderir."""
-    max_retries = 5
-    base_delay = 2  # saniye
-
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(api_url, json=payload)
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"API Rate limit aşıldı. {delay} saniye bekleniyor...")
-                await asyncio.sleep(delay)
-            else:
-                logger.error(f"API'ye istekte HTTP hatası: {e}")
-                return {}
-        except Exception as e:
-            logger.error(f"API'ye istekte beklenmedik hata: {e}")
-            return {}
-    
-    logger.error("Maksimum deneme sayısına ulaşıldı, API isteği başarısız.")
-    return {}
-
-
 def get_ai_persona_prompt(persona: str) -> str:
     return bot_config.get("personas", {}).get(persona, "Normal bir şekilde yaz.")
 
@@ -129,7 +99,7 @@ async def generate_content_from_image(image_bytes: bytes) -> Dict:
             "suggestions": [{"tactic": "Default", "captions": {"tr": "🔥 Zirve bizimdir! 👑 @KRBRZ063"}}],
             "hashtags": ["#KRBRZ", "#VIP"]
         }
-    model_name = bot_config.get("ai_model", "gemini-1.5-flash-latest")
+    model_name = bot_config.get("ai_model", "gemini-1.5-pro-latest")
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
     user_prompt = (
         "Bu bir PUBG Mobile hile/bypass ürününe ait ekran görüntüsü. Görüntüyü dikkatlice analiz et. "
@@ -149,39 +119,42 @@ async def generate_content_from_image(image_bytes: bytes) -> Dict:
         "contents": [{"parts": [{"text": user_prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9}
     }
-    
-    result = await api_request_with_backoff(api_url, payload)
-    if not result:
-        return {}
-
     try:
-        json_string = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-        content_data = json.loads(json_string)
-        return content_data if isinstance(content_data, dict) else {}
-    except (json.JSONDecodeError, IndexError) as e:
-        logger.error(f"AI JSON çıktısı işlenemedi: {e}")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(api_url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            json_string = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+            try:
+                content_data = json.loads(json_string)
+                return content_data if isinstance(content_data, dict) else {}
+            except json.JSONDecodeError:
+                logger.error(f"AI JSON çıktısı hatalı geldi: {json_string}")
+                return {}
+    except Exception as e:
+        logger.error(f"Gelişmiş içerik üretme API hatası: {e}")
         return {}
 
 async def enhance_text_with_gemini_smarter(original_text: str) -> str:
     """Metin tabanlı AI geliştirmesi için fonksiyon."""
     if not GEMINI_API_KEY or not original_text: return original_text + " @KRBRZ063 #KRBRZ"
-    model_name = bot_config.get("ai_model", "gemini-1.5-flash-latest")
+    model_name = bot_config.get("ai_model", "gemini-1.5-pro-latest")
     persona_prompt = get_ai_persona_prompt(bot_config.get("ai_persona", "Agresif Pazarlamacı"))
     user_prompt = f"Aşağıdaki metnin içeriğini analiz et: '{original_text}'. Bu içeriğe dayanarak, seçtiğim kişiliğe uygun, kısa, yaratıcı ve dikkat çekici bir sosyal medya başlığı oluştur. Sadece oluşturduğun başlığı yaz, başka bir açıklama yapma."
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": user_prompt}]}],"systemInstruction": {"parts": [{"text": persona_prompt}]},"generationConfig": {"maxOutputTokens": 80,"temperature": 0.8,"topP": 0.9,"topK": 40}}
-    
-    result = await api_request_with_backoff(api_url, payload)
-    if not result:
-        return original_text + " @KRBRZ063 #KRBRZ"
-
     try:
-        return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or original_text
-    except (IndexError) as e:
-        logger.error(f"AI Metin çıktısı işlenemedi: {e}")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(api_url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip() or original_text
+    except Exception as e:
+        logger.error(f"Akıllı Metin API hatası: {e}")
         return original_text + " @KRBRZ063 #KRBRZ"
 
 async def generate_automated_post(application: Application) -> None:
+    """Otomatik gönderi için AI ile satış metni üretir ve gönderir."""
     logger.info("Otomatik gönderi zamanı geldi, AI içerik üretiyor...")
     if not GEMINI_API_KEY: 
         logger.warning("Otomatik gönderi için Gemini API anahtarı bulunamadı.")
@@ -200,13 +173,18 @@ async def generate_automated_post(application: Application) -> None:
             logger.info(f"Otomatik gönderi {dest} kanalına gönderildi.")
         except Exception as e:
             logger.error(f"Otomatik gönderi hatası ({dest}): {e}")
+
 async def generate_user_reply(user_message: str) -> str:
+    """Kullanıcı mesajlarına AI ile yanıt verir."""
     if not GEMINI_API_KEY: return "Merhaba, KRBRZ VIP ile ilgilendiğiniz için teşekkürler. Detaylar için ana kanalımızı takip edin."
     persona = get_ai_persona_prompt("Profesyonel Satıcı")
     user_prompt = f"Bir müşteri sana şu soruyu sordu: '{user_message}'. Ona KRBRZ VIP ürününü tanıtan, ana kanala yönlendiren, kibar ve profesyonel bir yanıt yaz."
     
     return await enhance_text_with_gemini_smarter(user_prompt)
+
+# --- Filigran Fonksiyonu ---
 async def apply_watermark(photo_bytes: bytes) -> bytes:
+    # ... (Önceki versiyonla aynı) ...
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"): return photo_bytes
     try:
@@ -280,6 +258,7 @@ async def get_main_menu_content():
         [InlineKeyboardButton("✅ Menüyü Kapat", callback_data='menu_close')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
+
 async def get_channels_menu_content(channel_type: str):
     config_key = f"{channel_type}_channels"
     channels = bot_config.get(config_key, [])
@@ -289,6 +268,7 @@ async def get_channels_menu_content(channel_type: str):
     keyboard.append([InlineKeyboardButton(f"➕ Yeni {title} Kanalı Ekle", callback_data=f'add_{channel_type}')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
+
 async def get_admins_menu_content():
     admins = bot_config.get('admin_ids', [])
     text = "👥 **Admin Yönetimi**\n\nMevcut adminler:\n" + ("\n".join(f"`{admin_id}`" for admin_id in admins) or "_Boş_")
@@ -296,6 +276,7 @@ async def get_admins_menu_content():
     keyboard.append([InlineKeyboardButton("➕ Yeni Admin Ekle", callback_data=f'add_admin')])
     keyboard.append([InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data='menu_main')])
     return text, InlineKeyboardMarkup(keyboard)
+    
 async def get_ai_settings_menu_content():
     text = f"🧠 **AI Ayarları**\n\n- Aktif Model: `{bot_config['ai_model']}`\n- Aktif Persona: `{bot_config['ai_persona']}`"
     keyboard = [
@@ -304,6 +285,7 @@ async def get_ai_settings_menu_content():
         [InlineKeyboardButton("⬅️ Geri", callback_data='menu_main')],
     ]
     return text, InlineKeyboardMarkup(keyboard)
+
 async def get_persona_menu_content():
     text = "🎭 Yapay zeka için bir kişilik seçin:"
     keyboard = [
@@ -311,6 +293,7 @@ async def get_persona_menu_content():
     ]
     keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
     return text, InlineKeyboardMarkup(keyboard)
+
 async def get_model_menu_content():
     text = "🤖 Kullanılacak AI modelini seçin:"
     models = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]
@@ -319,6 +302,7 @@ async def get_model_menu_content():
     ]
     keyboard.append([InlineKeyboardButton("⬅️ Geri", callback_data='menu_ai_settings')])
     return text, InlineKeyboardMarkup(keyboard)
+
 @admin_only
 async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if 'menu_message_id' in context.user_data:
@@ -328,21 +312,26 @@ async def setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, reply_markup = await get_main_menu_content()
     sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     context.user_data['menu_message_id'] = sent_message.message_id
+
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
+    
     text, reply_markup = None, None
+
     toggle_map = {"toggle_text_ai": "Akıllı Metin", "toggle_image_ai": "Akıllı Görüntü", "toggle_watermark": "Filigran", "toggle_auto_post": "Otomatik Gönderi"}
     if data in toggle_map:
         await query.answer()
         key_part = data.replace('toggle_', '')
         config_key = 'enabled' if key_part == 'watermark' else f'{key_part}_enabled'
         target_dict = bot_config['watermark'] if key_part == 'watermark' else bot_config
+
         target_dict[config_key] = not target_dict[config_key]
         status = "açıldı" if target_dict[config_key] else "kapatıldı"
         await query.answer(f"✅ {toggle_map[data]} {status}", show_alert=True)
         save_config()
         text, reply_markup = await get_main_menu_content()
+    
     elif data == 'menu_main':
         await query.answer()
         text, reply_markup = await get_main_menu_content()
@@ -394,10 +383,12 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             config_key = "admin_ids"
             item_id = int(item_id_str)
+            
         if item_id in bot_config[config_key]:
             bot_config[config_key].remove(item_id)
             save_config()
             await query.answer(f"🗑️ {item_id} silindi.", show_alert=True)
+
         if item_type in ["source", "destination"]:
              text, reply_markup = await get_channels_menu_content(item_type)
         else:
@@ -408,8 +399,10 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.pop('menu_message_id', None)
         await query.message.reply_text("ℹ️ Menü kapatıldı. Tekrar açmak için /ayarla yazın.")
         return
+
     if text and reply_markup:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
 @admin_only
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or 'force_reply_info' not in context.user_data:
@@ -417,8 +410,10 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_info = context.user_data['force_reply_info']
     if update.message.reply_to_message.message_id != reply_info['message_id']:
         return
+    
     item_type = reply_info['type'].replace('add_', '')
     item_value = update.message.text.strip()
+    
     if item_type in ['source', 'destination']:
         config_key = f"{item_type}_channels"
         if not item_value.startswith("@") and not item_value.startswith("-100"):
@@ -434,12 +429,12 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_config()
         except ValueError:
             pass
+    
     await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=reply_info['message_id'])
     await update.message.delete()
     del context.user_data['force_reply_info']
     await setup_command(update, context)
 
-@admin_only
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if bot_config["is_paused"]: return
     message = update.channel_post
