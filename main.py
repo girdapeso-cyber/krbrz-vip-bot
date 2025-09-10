@@ -125,7 +125,6 @@ async def generate_content_from_image(image_bytes: bytes) -> Dict:
             response.raise_for_status()
             result = response.json()
             json_string = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-            # DÜZELTME: Güvenli JSON parse
             try:
                 content_data = json.loads(json_string)
                 return content_data if isinstance(content_data, dict) else {}
@@ -612,7 +611,7 @@ async def caption_choice_handler(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.send_photo(chat_id=dest, photo=watermarked_photo, caption=final_caption)
             success_count += 1
         except Exception as e:
-            logger.error(f"{dest} kanalına gönderim hatası: {e}")
+            logger.error(f"{dest} kanalına yönlendirme hatası: {e}")
 
     await query.edit_message_text(f"✅ Gönderim tamamlandı! {success_count} kanala gönderildi.")
     del context.bot_data[post_id]
