@@ -153,7 +153,7 @@ async def enhance_text_with_gemini_smarter(original_text: str) -> str:
         logger.error(f"Akıllı Metin API hatası: {e}")
         return original_text + " @KRBRZ063 #KRBRZ"
 
-async def generate_automated_post(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def generate_automated_post(application: Application) -> None:
     """Otomatik gönderi için AI ile satış metni üretir ve gönderir."""
     logger.info("Otomatik gönderi zamanı geldi, AI içerik üretiyor...")
     if not GEMINI_API_KEY: 
@@ -169,7 +169,7 @@ async def generate_automated_post(context: ContextTypes.DEFAULT_TYPE) -> None:
     
     for dest in bot_config["destination_channels"]:
         try:
-            await context.bot.send_message(chat_id=dest, text=post_text)
+            await application.bot.send_message(chat_id=dest, text=post_text)
             logger.info(f"Otomatik gönderi {dest} kanalına gönderildi.")
         except Exception as e:
             logger.error(f"Otomatik gönderi hatası ({dest}): {e}")
@@ -184,7 +184,6 @@ async def generate_user_reply(user_message: str) -> str:
 
 # --- Filigran Fonksiyonu ---
 async def apply_watermark(photo_bytes: bytes) -> bytes:
-    # ... (Önceki versiyonla aynı) ...
     wm_config = bot_config.get("watermark", {})
     if not wm_config.get("enabled"): return photo_bytes
     try:
@@ -435,8 +434,8 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del context.user_data['force_reply_info']
     await setup_command(update, context)
 
-@admin_only
 async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # DÜZELTME: @admin_only dekoratörü kaldırıldı.
     if bot_config["is_paused"]: return
     message = update.channel_post
     if not message: return
@@ -496,7 +495,11 @@ async def forwarder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             for dest in bot_config["destination_channels"]:
                 try:
-                    await message.copy(chat_id=dest, caption=final_caption)
+                    # DÜZELTME: message.copy yerine daha güvenli metodlar
+                    if message.video:
+                        await context.bot.send_video(chat_id=dest, video=message.video.file_id, caption=final_caption)
+                    else: # text, sticker etc.
+                        await context.bot.send_message(chat_id=dest, text=final_caption)
                     logger.info(f"Mesaj {dest} kanalına başarıyla yönlendirildi.")
                 except Exception as e:
                     logger.error(f"{dest} kanalına yönlendirme hatası: {e}")
@@ -520,7 +523,6 @@ async def user_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     ai_reply = await generate_user_reply(user_text)
     await update.message.reply_text(ai_reply, parse_mode='Markdown')
 
-# DÜZELTME: Eksik Komut Fonksiyonları Eklendi
 @admin_only
 async def list_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     source = "\n".join(f"`{ch}`" for ch in bot_config['source_channels']) or "_Yok_"
@@ -626,7 +628,7 @@ def main():
     if bot_config.get("auto_post_enabled"):
         time_parts = bot_config.get("auto_post_time", "19:00").split(':')
         # DÜZELTME: Scheduler'a application nesnesini doğru şekilde aktarma
-        scheduler.add_job(generate_automated_post, 'cron', hour=int(time_parts[0]), minute=int(time_parts[1]), args=[ContextTypes.DEFAULT_TYPE(application=application)])
+        scheduler.add_job(generate_automated_post, 'cron', hour=int(time_parts[0]), minute=int(time_parts[1]), args=[application])
         scheduler.start()
         logger.info(f"Otomatik gönderi saat {bot_config['auto_post_time']} için zamanlandı.")
 
